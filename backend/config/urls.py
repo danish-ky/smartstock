@@ -1,6 +1,8 @@
 from inventory.billing import (ManualPaymentView, OrderInvoiceView, RazorpayStartView,
                                RazorpayVerifyView, RazorpayWebhookView)
 from django.contrib import admin
+from django.conf import settings
+from django.conf.urls.static import static
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -9,6 +11,7 @@ from accounts.views import MeView, LogoutView, UserViewSet
 from inventory.views import (
     CategoryViewSet, ProductViewSet, SupplierViewSet, CustomerViewSet,
     OrderViewSet, StockMovementViewSet, StockAdjustView, DashboardView, ReportsView, HealthView,
+    MyOrderListView, MyOrderDetailView,
 )
 
 router = DefaultRouter()
@@ -26,6 +29,8 @@ urlpatterns = [
     path('api/auth/logout/', LogoutView.as_view(), name='token_logout'),
     path('api/auth/me/', MeView.as_view(), name='me'),
     path('api/dashboard/', DashboardView.as_view(), name='dashboard'),
+    path('api/my/orders/', MyOrderListView.as_view(), name='my-orders'),
+    path('api/my/orders/<int:pk>/', MyOrderDetailView.as_view(), name='my-order-detail'),
     path('api/reports/', ReportsView.as_view(), name='reports'),
     path('api/inventory/adjust/', StockAdjustView.as_view(), name='adjust-stock'),
     path('api/health/', HealthView.as_view(), name='health'),
@@ -38,3 +43,7 @@ urlpatterns = [
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/', include(router.urls)),
 ]
+
+# Serve uploaded product images only during local development.
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

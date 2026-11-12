@@ -1,4 +1,6 @@
 from decimal import Decimal
+from uuid import uuid4
+from PIL import Image
 from django.db.models import Sum
 from rest_framework import serializers
 from .models import Category, Supplier, Product, Customer, Order, OrderItem, StockMovement
@@ -19,10 +21,19 @@ class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     supplier_name = serializers.CharField(source='supplier.name', read_only=True, default='')
     stock_status = serializers.CharField(read_only=True)
+    image_url = serializers.SerializerMethodField()
+
+    def get_image_url(self, obj):
+        if not obj.image:
+            return None
+        url = obj.image.url
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
+
     class Meta:
         model = Product
         fields = ('id','name','sku','description','category','category_name','supplier', 'supplier_name',
-                  'price','cost','stock','low_stock_threshold','stock_status','is_active','created_at','updated_at')
+                  'price','cost','stock','low_stock_threshold','stock_status','image_url','is_active','created_at','updated_at')
         read_only_fields = ('id','stock','stock_status','created_at','updated_at')
     def validate_sku(self, value):
         return value.strip().upper()
@@ -31,6 +42,47 @@ class ProductSerializer(serializers.ModelSerializer):
         if self.instance and attrs.get('is_active') is False and self.instance.stock:
             raise serializers.ValidationError({'is_active': 'Move stock out before deactivating a product.'})
         return attrs
+
+class CustomerCatalogProductSerializer(serializers.ModelSerializer):
+    """Customer-safe product fields; never expose cost, stock count, or supplier."""
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    stock_status = serializers.CharField(read_only=True)
+    image_url = serializers.SerializerMethodField()
+
+    def get_image_url(self, obj):
+        if not obj.image:
+            return None
+        url = obj.image.url
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
+
+    class Meta:
+        model = Product
+        fields = ('id', 'name', 'sku', 'description', 'category_name', 'price', 'stock_status', 'image_url')
+        read_only_fields = fields
+
+
+class ProductImageUploadSerializer(serializers.Serializer):
+    image = serializers.ImageField(required=True, allow_empty_file=False)
+
+    def validate_image(self, upload):
+        if upload.size > 3 * 1024 * 1024:
+            raise serializers.ValidationError('Maximum image size is 3 MB.')
+        try:
+            with Image.open(upload) as image:
+                image_format = image.format
+                width, height = image.size
+                if image_format not in ('JPEG', 'PNG', 'WEBP'):
+                    raise serializers.ValidationError('Upload JPG, PNG, or WebP images only.')
+                if width > 4096 or height > 4096:
+                    raise serializers.ValidationError('Image dimensions must be at most 4096 × 4096.')
+            upload.seek(0)
+        except (OSError, ValueError, Image.DecompressionBombError):
+            raise serializers.ValidationError('The uploaded file is not a valid image.')
+        extension = {'JPEG': 'jpg', 'PNG': 'png', 'WEBP': 'webp'}[image_format]
+        upload.name = f'{uuid4().hex}.{extension}'
+        return upload
+
 
 class CustomerSerializer(serializers.ModelSerializer):
     total_orders = serializers.IntegerField(read_only=True, default=0)
@@ -66,6 +118,27 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = ('id','number','customer','customer_name','status','total','notes','items',
                   'created_by_name','created_at','updated_at','paid_amount','payment_status')
+
+class CustomerOrderSerializer(serializers.ModelSerializer):
+    """Customer-facing receipt details (no staff notes or internal actor data)."""
+    items = OrderItemSerializer(many=True, read_only=True)
+    paid_amount = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
+
+    def get_paid_amount(self, obj):
+        total = obj.payments.aggregate(value=Sum('amount'))['value'] or Decimal('0.00')
+        return str(total)
+
+    def get_payment_status(self, obj):
+        total = obj.payments.aggregate(value=Sum('amount'))['value'] or Decimal('0.00')
+        return 'paid' if total >= obj.total else 'partial' if total > 0 else 'unpaid'
+
+    class Meta:
+        model = Order
+        fields = ('id', 'number', 'status', 'total', 'items', 'created_at',
+                  'paid_amount', 'payment_status')
+        read_only_fields = fields
+
 
 class OrderLineInputSerializer(serializers.Serializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.filter(is_active=True))

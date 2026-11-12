@@ -2,7 +2,7 @@ export type Role = 'admin' | 'manager' | 'staff' | 'user';
 export interface User { id: number; username: string; name?: string; first_name: string; last_name: string; email: string; role: Role; is_active?: boolean; date_joined?: string; }
 export interface Category { id: number; name: string; description: string; }
 export interface Supplier { id: number; name: string; email: string; phone: string; address: string; }
-export interface Product { id: number; name: string; sku: string; description: string; category: number; category_name: string; supplier: number | null; supplier_name: string; price: string; cost: string; stock: number; low_stock_threshold: number; stock_status: 'healthy'|'low'|'out'; is_active: boolean; created_at: string; }
+export interface Product { image_url?: string | null; id: number; name: string; sku: string; description: string; category: number; category_name: string; supplier: number | null; supplier_name: string; price: string; cost: string; stock: number; low_stock_threshold: number; stock_status: 'healthy'|'low'|'out'; is_active: boolean; created_at: string; }
 export interface Customer { id: number; name: string; email: string; phone: string; address: string; total_orders: number; created_at: string; }
 export interface OrderItem { id: number; product: number; product_name: string; sku: string; quantity: number; unit_price: string; subtotal: string; }
 export interface Order { paid_amount: string; payment_status: 'unpaid'|'partial'|'paid'; id: number; number: string; customer: number; customer_name: string; status: 'placed'|'fulfilled'|'cancelled'; total: string; notes: string; items: OrderItem[]; created_by_name: string; created_at: string; }

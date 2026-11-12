@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ButtonHTMLAttributes, FormEvent, ReactNode } from 'react';
 import { AlertCircle, ArrowDownRight, ArrowUpRight, Check, ChevronDown, CircleHelp, LoaderCircle, PackageOpen, Plus, Search, X } from 'lucide-react';
 import { money } from '../lib';
@@ -16,7 +17,7 @@ export function EmptyState({title='Nothing here yet',description='Try updating y
 export function Loading({label='Loading your workspace...'}:{label?:string}){return <div className="loading"><LoaderCircle className="spin" size={28}/><span>{label}</span></div>}
 export function ErrorMessage({error,retry}:{error:string;retry?:()=>void}){return <div className="error-banner"><AlertCircle size={18}/><span>{error}</span>{retry&&<button onClick={retry}>Retry</button>}</div>}
 export function Metric({label,value,trend,icon,tone='blue',caption}:{label:string;value:string;trend?:string;icon:ReactNode;tone?:string;caption?:string}){return <article className="metric"><div className="metric-first"><span>{label}</span><span className={`metric-icon tone-${tone}`}>{icon}</span></div><strong>{value}</strong><div className="metric-foot">{trend&&<span className="trend"><ArrowUpRight size={13}/>{trend}</span>}<span>{caption||'Live operational data'}</span></div></article>}
-export function ProductAvatar({name,category}:{name:string;category?:string}){const group=(category||name).toLowerCase();const tone=group.includes('electron')||group.includes('monit')?'violet':group.includes('office')||group.includes('note')?'gold':group.includes('stor')||group.includes('ssd')?'coral':'blue';return <div className={`product-avatar avatar-${tone}`}><span>{name.slice(0,2).toUpperCase()}</span></div>}
+export function ProductAvatar({name,category,imageUrl}:{name:string;category?:string;imageUrl?:string|null}){const [failed,setFailed]=useState(false);useEffect(()=>setFailed(false),[imageUrl]);const group=(category||name).toLowerCase();const tone=group.includes('electron')||group.includes('monit')?'violet':group.includes('office')||group.includes('note')?'gold':group.includes('stor')||group.includes('ssd')?'coral':'blue';return <div className={`product-avatar avatar-${tone}`}>{imageUrl&&!failed?<img src={imageUrl} alt={name} loading="lazy" onError={()=>setFailed(true)}/>:<span>{name.slice(0,2).toUpperCase()}</span>}</div>}
 export function Hint({children}:{children:ReactNode}){return <div className="hint"><CircleHelp size={16}/>{children}</div>}
 export function InventoryBadge({p}:{p:Product}){return <Status value={p.stock_status} />}
 export function OrderBadge({o}:{o:Order}){return <Status value={o.status} />}

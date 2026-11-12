@@ -5,12 +5,13 @@ import { toast } from 'react-hot-toast';
 import { useAuth } from '../auth';
 import { canManage, canOperate, initials } from '../lib';
 
+const customerLinks=[{path:'/customer',label:'Overview',icon:LayoutDashboard},{path:'/my/orders',label:'My orders',icon:ClipboardList},{path:'/catalog',label:'Browse products',icon:Package}];
 const groups=[
  {label:'WORKSPACE', links:[{path:'/',label:'Overview',icon:LayoutDashboard},{path:'/products',label:'Products',icon:Package},{path:'/inventory',label:'Inventory',icon:Warehouse},{path:'/orders',label:'Orders',icon:ClipboardList}]},
  {label:'MANAGEMENT', links:[{path:'/customers',label:'Customers',icon:ContactRound},{path:'/suppliers',label:'Suppliers',icon:Truck},{path:'/categories',label:'Categories',icon:FolderTree}]},
  {label:'ANALYTICS', links:[{path:'/reports',label:'Reports',icon:ChartNoAxesCombined},{path:'/team',label:'Team & access',icon:Users}]},
 ];
-const titles:Record<string,string>={'/':'Overview','/products':'Products','/inventory':'Inventory','/orders':'Orders','/customers':'Customers','/suppliers':'Suppliers','/categories':'Categories','/reports':'Reports','/team':'Team & access'};
+const titles:Record<string,string>={'/customer':'Customer overview','/my/orders':'My orders','/catalog':'Browse products','/':'Overview','/products':'Products','/inventory':'Inventory','/orders':'Orders','/customers':'Customers','/suppliers':'Suppliers','/categories':'Categories','/reports':'Reports','/team':'Team & access'};
 
 export default function Layout(){
  const {user,logout}=useAuth();const location=useLocation();const navigate=useNavigate();
@@ -21,9 +22,9 @@ export default function Layout(){
   {mobileOpen&&<div className="sidebar-scrim" onClick={()=>setMobileOpen(false)}/>}
   <aside className={`sidebar ${mobileOpen?'sidebar-open':''}`}>
    <div className="sidebar-logo"><div className="logo-mark"><Boxes size={23} strokeWidth={2.4}/></div><div><strong>smartstock<span>.</span></strong><small>INVENTORY INTELLIGENCE</small></div><button className="sidebar-close" aria-label="Close menu" onClick={()=>setMobileOpen(false)}><X size={21}/></button></div>
-   <div className="workspace-switch"><div className="workspace-icon"><Warehouse size={18}/></div><div><strong>Main Workspace</strong><small>Operations dashboard</small></div><ChevronDown size={16}/></div>
+   <div className="workspace-switch"><div className="workspace-icon"><Warehouse size={18}/></div><div><strong>{user?.role==='user'?'Customer Portal':'Main Workspace'}</strong><small>{user?.role==='user'?'My account':'Operations dashboard'}</small></div><ChevronDown size={16}/></div>
    <nav className="sidebar-nav">
-    {groups.map(group=><section key={group.label}><div className="nav-label">{group.label}</div>{group.links.filter(l=>{
+    {user?.role==='user' ? <section><div className="nav-label">MY ACCOUNT</div>{customerLinks.map(({path,label,icon:Icon})=><NavLink key={path} to={path} className={({isActive})=>`nav-item ${isActive?'active':''}`} onClick={()=>setMobileOpen(false)}><Icon size={18}/><span>{label}</span></NavLink>)}</section> : groups.map(group=><section key={group.label}><div className="nav-label">{group.label}</div>{group.links.filter(l=>{
       if(l.path==='/team') return user?.role==='admin';
       if(['/reports','/suppliers','/categories'].includes(l.path))return isManager;
       if(['/orders','/inventory','/customers','/'].includes(l.path))return isOperator;

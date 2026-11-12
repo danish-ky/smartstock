@@ -1,49 +1,63 @@
-**/.env
-**/.venv/
-**/__pycache__/
-**/*.py[cod]
-**/*.sqlite3
-**/node_modules/
-**/dist/
-**/staticfiles/
-.DS_Store
 
+# =========================================
+# SmartStock - Git Ignore Configuration
+# =========================================
 
-
-
-# Python
-.venv/
-venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Django
-*.sqlite3
-media/
-staticfiles/
-*.log
-
-# Environment variables and secrets
+# 1. Environment Variables & Secrets
 .env
 .env.*
 !.env.example
 !.env.*.example
+*.pem
+*.key
 
-# React / React Native
+# 2. Python / Django
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.log
+
+# 3. Django Generated Files
+staticfiles/
+media/
+backend/media/
+
+# 4. React / TypeScript / Node.js
 node_modules/
 dist/
 build/
-.expo/
-.next/
 coverage/
+.next/
+*.tsbuildinfo
 
-# IDE
+# 5. React Native / Expo
+.expo/
+.expo-shared/
+android/.gradle/
+ios/Pods/
+
+# 6. IDE Files
 .vscode/
 .idea/
+*.swp
 
-# Operating system
+# 7. Operating System
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# 8. Optional SmartStock Development Files
+/SmartStock_5_Feature_Upgrade.patch
+/SmartStock_Upgrade_Instructions.md
+
+# 9. Backup Files
+*.bak
+*.backup
+*.sql
+*.dump

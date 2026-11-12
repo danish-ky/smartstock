@@ -18,7 +18,7 @@ from drf_spectacular.types import OpenApiTypes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, PermissionDenied
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -31,6 +31,22 @@ OPERATORS = ('admin', 'manager', 'staff')
 
 def can_operate(user):
     return user.is_authenticated and (user.is_superuser or user.role in OPERATORS)
+
+
+def permitted_order(user, order_id, lock=False):
+    """Enforce per-customer read access for invoices and payment history.
+
+    Unowned customer orders return 404 to avoid enumeration.
+    Gateway start and verify are operator-only, checked separately.
+    """
+    if not user.is_authenticated:
+        raise PermissionDenied('Authentication required.')
+    qs = Order.objects.select_for_update() if lock else Order.objects.all()
+    if can_operate(user):
+        return get_object_or_404(qs, pk=order_id)
+    if user.role == 'user':
+        return get_object_or_404(qs, pk=order_id, customer__user_id=user.pk)
+    raise PermissionDenied('Insufficient permission.')
 
 
 def paid_amount(order):
@@ -53,12 +69,17 @@ class ManualPaymentView(APIView):
 
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     def get(self, request, order_id):
-        if not can_operate(request.user):
-            return Response({'detail':'Insufficient permission.'}, status=403)
-        order = get_object_or_404(Order, pk=order_id)
-        return Response({'payments':[{'id':p.pk,'amount':str(p.amount),'method':p.method,
-                  'reference':p.reference,'created_at':p.created_at} for p in order.payments.all()],
-                  'paid_amount':str(paid_amount(order)), 'payment_status':payment_state(order)})
+        order = permitted_order(request.user, order_id)
+        is_operator = can_operate(request.user)
+        records = [
+            {'id': p.pk, 'amount': str(p.amount), 'method': p.method,
+             'created_at': p.created_at,
+             **({'reference': p.reference} if is_operator else {})}
+            for p in order.payments.all()
+        ]
+        return Response({'payments': records,
+                         'paid_amount': str(paid_amount(order)),
+                         'payment_status': payment_state(order)})
 
     @extend_schema(request=ManualPaymentSerializer, responses={201: OpenApiTypes.OBJECT})
     @transaction.atomic
@@ -97,11 +118,11 @@ class RazorpayStartView(APIView):
     @transaction.atomic
     def post(self, request, order_id):
         if not can_operate(request.user):
-            return Response({'detail':'Insufficient permission.'}, status=403)
+            raise PermissionDenied('Payment collection is restricted to staff and managers.')
+        order = permitted_order(request.user, order_id, lock=True)
         client = gateway_client()
         if client is None:
             return Response({'detail':'Razorpay TEST credentials are not configured.'}, status=503)
-        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
         if order.status == Order.Status.CANCELLED:
             raise ValidationError('Cancelled order.')
         outstanding = order.total - paid_amount(order)
@@ -172,7 +193,8 @@ class RazorpayVerifyView(APIView):
     @extend_schema(request=RazorpayVerifySerializer, responses={200: OpenApiTypes.OBJECT})
     def post(self, request, order_id):
         if not can_operate(request.user):
-            return Response({'detail':'Insufficient permission.'}, status=403)
+            raise PermissionDenied('Payment verification is restricted to staff and managers.')
+        permitted_order(request.user, order_id)
         serializer = RazorpayVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data=serializer.validated_data
@@ -210,8 +232,7 @@ class OrderInvoiceView(APIView):
     permission_classes = [IsAuthenticated]
     @extend_schema(responses={(200, "application/pdf"): OpenApiTypes.BINARY})
     def get(self, request, order_id):
-        if not can_operate(request.user):
-            return Response({'detail':'Insufficient permission.'},status=403)
+        permitted_order(request.user, order_id)
         order = get_object_or_404(Order.objects.select_related('customer','created_by').prefetch_related('items__product'),pk=order_id)
         buffer=io.BytesIO()
         pdf=canvas.Canvas(buffer,pagesize=A4)

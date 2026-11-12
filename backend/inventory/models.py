@@ -1,6 +1,7 @@
 from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MinValueValidator
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
@@ -28,6 +29,7 @@ class Product(models.Model):
     name = models.CharField(max_length=180, db_index=True)
     sku = models.CharField(max_length=64, unique=True)
     description = models.TextField(blank=True)
+    image = models.ImageField(upload_to="product_images/", blank=True, null=True)
     category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name='products')
     supplier = models.ForeignKey(Supplier, null=True, blank=True, on_delete=models.SET_NULL, related_name='products')
     price = models.DecimalField(max_digits=12, decimal_places=2, validators=[money_min])
@@ -47,6 +49,12 @@ class Product(models.Model):
     def __str__(self): return f'{self.name} ({self.sku})'
 
 class Customer(models.Model):
+    # Customer records may exist without login; linking an account is optional.
+    # OneToOneField prevents one login from being linked to multiple customers.
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='customer_profile', limit_choices_to={'role': 'user'},
+    )
     name = models.CharField(max_length=160, db_index=True)
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=30, blank=True)
@@ -54,6 +62,10 @@ class Customer(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         ordering = ['-created_at']
+    def clean(self):
+        super().clean()
+        if self.user_id and self.user.role != 'user':
+            raise ValidationError({'user': 'Only accounts with the User (Customer) role may be linked.'})
     def __str__(self): return self.name
 
 class Order(models.Model):

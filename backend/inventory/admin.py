@@ -29,4 +29,10 @@ class MovementAdmin(admin.ModelAdmin):
     def has_add_permission(self, request): return False
     def has_delete_permission(self, request, obj=None): return False
 
-admin.site.register([Category, Supplier, Customer])
+@admin.register(Customer)
+class CustomerAdmin(admin.ModelAdmin):
+    list_display = ('name', 'email', 'phone', 'user')
+    search_fields = ('name', 'email', 'phone', 'user__username')
+    autocomplete_fields = ('user',)
+
+admin.site.register([Category, Supplier])

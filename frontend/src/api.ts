@@ -38,7 +38,7 @@ function details(data: unknown, status:number):string {
 }
 
 export async function request<T=unknown>(path:string, options:RequestInit={}, retry=true):Promise<T> {
-  const headers:Record<string,string>={'Content-Type':'application/json',...(options.headers as Record<string,string>||{})};
+  const headers:Record<string,string>={...(options.body instanceof FormData ? {} : {'Content-Type':'application/json'}),...(options.headers as Record<string,string>||{})};
   const token=sessionStorage.getItem(ACCESS);
   if(token) headers.Authorization=`Bearer ${token}`;
   const res=await fetch(`${BASE}${path.startsWith('/')?path:'/'+path}`,{...options,headers});
@@ -82,6 +82,8 @@ export const api = {
   put:<T>(path:string,body:unknown)=>request<T>(path,{method:'PUT',body:JSON.stringify(body)}),
   patch:<T>(path:string,body:unknown)=>request<T>(path,{method:'PATCH',body:JSON.stringify(body)}),
   del:<T>(path:string)=>request<T>(path,{method:'DELETE'}),
+  uploadImage:<T>(id:number,file:File)=>{const form=new FormData();form.append('image',file);return request<T>(`/products/${id}/image/`,{method:'POST',body:form});},
+  removeImage:<T>(id:number)=>request<T>(`/products/${id}/image/`,{method:'DELETE'}),
   list:async<T>(path:string):Promise<T[]>=>{
     let next:string|null=path;const all:T[]=[];
     let pages=0;

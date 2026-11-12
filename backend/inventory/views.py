@@ -2,8 +2,9 @@ from datetime import date, timedelta
 from django.db.models import Count, F, Q, Sum, DecimalField, ExpressionWrapper
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import TruncDate
-from rest_framework import status, viewsets, mixins
+from rest_framework import status, viewsets, mixins, generics
 from rest_framework.decorators import action
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
@@ -13,7 +14,8 @@ from .serializers import (CategorySerializer, SupplierSerializer, ProductSeriali
                           CustomerSerializer, OrderSerializer, OrderCreateSerializer,
                           StockMovementSerializer, StockAdjustSerializer,
                           DashboardResponseSerializer, ReportsResponseSerializer,
-                          HealthResponseSerializer)
+                          HealthResponseSerializer, CustomerOrderSerializer,
+                          CustomerCatalogProductSerializer, ProductImageUploadSerializer)
 from .services import adjust_stock, place_order, change_order_status
 
 from drf_spectacular.utils import extend_schema
@@ -57,12 +59,19 @@ class SupplierViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
 
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
+
+    def get_serializer_class(self):
+        if (self.request.user.is_authenticated and self.request.user.role == 'user'
+                and not self.request.user.is_superuser):
+            return CustomerCatalogProductSerializer
+        return self.serializer_class
     permission_classes = [RolePermission]
     write_roles = ADMIN_MANAGER
 
     def get_queryset(self):
         qs = Product.objects.select_related('category', 'supplier')
-        if self.request.query_params.get('include_inactive') != 'true':
+        if (self.request.query_params.get('include_inactive') != 'true'
+                or self.request.user.role == 'user' and not self.request.user.is_superuser):
             qs = qs.filter(is_active=True)
         q = self.request.query_params.get('search', '').strip()
         if q: qs = qs.filter(Q(name__icontains=q) | Q(sku__icontains=q) | Q(description__icontains=q))
@@ -75,6 +84,31 @@ class ProductViewSet(viewsets.ModelViewSet):
         if stock == 'out': qs = qs.filter(stock=0)
         if stock == 'healthy': qs = qs.filter(stock__gt=F('low_stock_threshold'))
         return qs.order_by('-created_at')
+
+    @extend_schema(
+        request=ProductImageUploadSerializer,
+        responses={200: ProductSerializer},
+        summary='Upload or replace a product image',
+    )
+    @action(detail=True, methods=['post', 'delete'], url_path='image',
+            parser_classes=[MultiPartParser, FormParser])
+    def image(self, request, pk=None):
+        if not (request.user.is_superuser or request.user.role in ADMIN_MANAGER):
+            return Response({'detail': 'Only Admin or Manager can edit product images.'}, status=403)
+        product = self.get_object()
+        previous_name = product.image.name if product.image else None
+        storage = product.image.storage
+        if request.method == 'DELETE':
+            product.image = None
+            product.save(update_fields=['image', 'updated_at'])
+        else:
+            serializer = ProductImageUploadSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            product.image = serializer.validated_data['image']
+            product.save(update_fields=['image', 'updated_at'])
+        if previous_name and previous_name != (product.image.name if product.image else None):
+            storage.delete(previous_name)
+        return Response(ProductSerializer(product, context={'request': request}).data)
 
     def perform_destroy(self, instance):
         # Soft-delete preserves order history; stock cannot be directly modified through product PATCH.
@@ -168,12 +202,29 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
         order = self.get_object()
         return Response(OrderSerializer(change_order_status(order_id=order.pk, status='fulfilled', actor=request.user)).data)
 
+    
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
-        if request.user.role not in ADMIN_MANAGER and not request.user.is_superuser:
-            return Response({'detail': 'Only managers and admins can cancel orders.'}, status=403)
+        if request.user.role not in OPERATORS and not request.user.is_superuser:
+            return Response(
+                {
+                    'detail': 'Only admins, managers and staff can cancel orders.'
+                },
+                status=403
+            )
+
         order = self.get_object()
-        return Response(OrderSerializer(change_order_status(order_id=order.pk, status='cancelled', actor=request.user)).data)
+
+        return Response(
+            OrderSerializer(
+                change_order_status(
+                    order_id=order.pk,
+                    status='cancelled',
+                    actor=request.user
+                )
+            ).data
+        )
+
 
 class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
@@ -249,3 +300,37 @@ class HealthView(APIView):
     @extend_schema(responses=HealthResponseSerializer, summary='Public API health check')
     def get(self, request):
         return Response({'status': 'ok', 'service': 'smartstock-api'})
+
+
+class MyOrderListView(generics.ListAPIView):
+    """Customer orders are filtered to the account's linked Customer record."""
+    serializer_class = CustomerOrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        if self.request.user.role != 'user' or self.request.user.is_superuser:
+            return Order.objects.none()
+        return (Order.objects.filter(customer__user_id=self.request.user.pk)
+                .prefetch_related('items__product', 'payments')
+                .order_by('-created_at'))
+
+    def list(self, request, *args, **kwargs):
+        if request.user.role != 'user' or request.user.is_superuser:
+            return Response({'detail': 'Customer account required.'}, status=403)
+        return super().list(request, *args, **kwargs)
+
+
+class MyOrderDetailView(generics.RetrieveAPIView):
+    serializer_class = CustomerOrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        if self.request.user.role != 'user' or self.request.user.is_superuser:
+            return Order.objects.none()
+        return (Order.objects.filter(customer__user_id=self.request.user.pk)
+                .prefetch_related('items__product', 'payments'))
+
+    def retrieve(self, request, *args, **kwargs):
+        if request.user.role != 'user' or request.user.is_superuser:
+            return Response({'detail': 'Customer account required.'}, status=403)
+        return super().retrieve(request, *args, **kwargs)
