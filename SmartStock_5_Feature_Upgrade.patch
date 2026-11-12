@@ -1,0 +1,723 @@
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -7,3 +7,9 @@
+ DATABASE_URL=
+ # Optional: for demo seeding, manually set a strong password first.
+ DEMO_ADMIN_PASSWORD=
++
++# TEST MODE ONLY: generate keys in Razorpay Test Mode. Do not commit secrets.
++RAZORPAY_KEY_ID=
++RAZORPAY_KEY_SECRET=
++RAZORPAY_WEBHOOK_SECRET=
++SMARTSTOCK_BUSINESS_NAME=SmartStock
+--- a/backend/config/urls.py
++++ b/backend/config/urls.py
+@@ -1,3 +1,5 @@
++from inventory.billing import (ManualPaymentView, OrderInvoiceView, RazorpayStartView,
++                               RazorpayVerifyView, RazorpayWebhookView)
+ from django.contrib import admin
+ from django.urls import path, include
+ from rest_framework.routers import DefaultRouter
+@@ -27,6 +29,11 @@
+     path('api/reports/', ReportsView.as_view(), name='reports'),
+     path('api/inventory/adjust/', StockAdjustView.as_view(), name='adjust-stock'),
+     path('api/health/', HealthView.as_view(), name='health'),
++    path('api/orders/<int:order_id>/payments/', ManualPaymentView.as_view(), name='order-payments'),
++    path('api/orders/<int:order_id>/invoice/', OrderInvoiceView.as_view(), name='order-invoice'),
++    path('api/orders/<int:order_id>/razorpay/start/', RazorpayStartView.as_view(), name='razorpay-start'),
++    path('api/orders/<int:order_id>/razorpay/verify/', RazorpayVerifyView.as_view(), name='razorpay-verify'),
++    path('api/razorpay/webhook/', RazorpayWebhookView.as_view(), name='razorpay-webhook'),
+     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+     path('api/', include(router.urls)),
+--- /dev/null
++++ b/backend/inventory/billing.py
+@@ -0,0 +1,267 @@
++"""SmartStock billing addon: audited manual payments, test Razorpay, PDF sales invoice."""
++import hashlib
++import hmac
++import io
++import json
++import os
++from decimal import Decimal
++
++from django.conf import settings
++from django.db import transaction
++from django.db.models import Sum
++from django.http import HttpResponse
++from django.shortcuts import get_object_or_404
++from django.utils import timezone
++from rest_framework import serializers, status
++from drf_spectacular.utils import extend_schema
++from drf_spectacular.types import OpenApiTypes
++from rest_framework.permissions import AllowAny, IsAuthenticated
++from rest_framework.response import Response
++from rest_framework.views import APIView
++from rest_framework.exceptions import ValidationError
++from reportlab.lib import colors
++from reportlab.lib.pagesizes import A4
++from reportlab.pdfgen import canvas
++
++from .models import Order, Payment, RazorpayAttempt
++from .serializers import OrderSerializer
++
++OPERATORS = ('admin', 'manager', 'staff')
++
++
++def can_operate(user):
++    return user.is_authenticated and (user.is_superuser or user.role in OPERATORS)
++
++
++def paid_amount(order):
++    return order.payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
++
++
++def payment_state(order):
++    amount = paid_amount(order)
++    return 'paid' if amount >= order.total else 'partial' if amount > 0 else 'unpaid'
++
++
++class ManualPaymentSerializer(serializers.Serializer):
++    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal('0.01'))
++    method = serializers.ChoiceField(choices=[('cash','Cash'),('upi','UPI'),('card','Card'),('bank','Bank transfer')])
++    reference = serializers.CharField(required=False, allow_blank=True, max_length=120)
++
++
++class ManualPaymentView(APIView):
++    permission_classes = [IsAuthenticated]
++
++    @extend_schema(responses={200: OpenApiTypes.OBJECT})
++    def get(self, request, order_id):
++        if not can_operate(request.user):
++            return Response({'detail':'Insufficient permission.'}, status=403)
++        order = get_object_or_404(Order, pk=order_id)
++        return Response({'payments':[{'id':p.pk,'amount':str(p.amount),'method':p.method,
++                  'reference':p.reference,'created_at':p.created_at} for p in order.payments.all()],
++                  'paid_amount':str(paid_amount(order)), 'payment_status':payment_state(order)})
++
++    @extend_schema(request=ManualPaymentSerializer, responses={201: OpenApiTypes.OBJECT})
++    @transaction.atomic
++    def post(self, request, order_id):
++        if not can_operate(request.user):
++            return Response({'detail':'Insufficient permission.'}, status=403)
++        serializer = ManualPaymentSerializer(data=request.data)
++        serializer.is_valid(raise_exception=True)
++        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
++        if order.status == Order.Status.CANCELLED:
++            raise ValidationError('Cancelled orders cannot accept payments.')
++        if order.gateway_attempts.filter(status='created').exists():
++            raise ValidationError('An online checkout exists. Resolve it before entering a manual payment.')
++        value = serializer.validated_data['amount']
++        if value > order.total - paid_amount(order):
++            raise ValidationError({'amount':'Amount exceeds outstanding order balance.'})
++        p = Payment.objects.create(order=order, amount=value,
++            method=serializer.validated_data['method'],
++            reference=serializer.validated_data.get('reference',''), recorded_by=request.user)
++        return Response({'id':p.id,'order':OrderSerializer(order).data}, status=201)
++
++
++def gateway_client():
++    key_id = os.environ.get('RAZORPAY_KEY_ID','').strip()
++    key_secret = os.environ.get('RAZORPAY_KEY_SECRET','').strip()
++    if not key_id.startswith('rzp_test_') or not key_secret:
++        return None
++    import razorpay
++    return razorpay.Client(auth=(key_id, key_secret))
++
++
++class RazorpayStartView(APIView):
++    permission_classes = [IsAuthenticated]
++
++    @extend_schema(request=None, responses={200: OpenApiTypes.OBJECT})
++    @transaction.atomic
++    def post(self, request, order_id):
++        if not can_operate(request.user):
++            return Response({'detail':'Insufficient permission.'}, status=403)
++        client = gateway_client()
++        if client is None:
++            return Response({'detail':'Razorpay TEST credentials are not configured.'}, status=503)
++        order = get_object_or_404(Order.objects.select_for_update(), pk=order_id)
++        if order.status == Order.Status.CANCELLED:
++            raise ValidationError('Cancelled order.')
++        outstanding = order.total - paid_amount(order)
++        if outstanding <= 0:
++            raise ValidationError('This order is already paid.')
++        amount_paise = int(outstanding * 100)
++        existing = order.gateway_attempts.filter(status='created', amount_paise=amount_paise).first()
++        if existing:
++            attempt = existing
++        else:
++            if order.gateway_attempts.filter(status='created').exists():
++                raise ValidationError('An unresolved checkout already exists for this order.')
++            try:
++                remote = client.order.create({'amount':amount_paise,'currency':'INR',
++                    'receipt':f'SS-{order.pk}', 'notes': {'smartstock_order':str(order.pk)}})
++            except Exception:
++                return Response({'detail':'Razorpay service unavailable. Try again later.'}, status=502)
++            attempt = RazorpayAttempt.objects.create(order=order,
++                        gateway_order_id=remote['id'],amount_paise=amount_paise)
++        return Response({'key_id':os.environ['RAZORPAY_KEY_ID'],
++                         'razorpay_order_id':attempt.gateway_order_id,
++                         'amount':amount_paise, 'currency':'INR',
++                         'name':'SmartStock — TEST PAYMENT', 'description':order.number})
++
++
++def _confirm_captured(razorpay_order_id, payment_id):
++    """Verify on server and record exactly one payment, even after duplicate callbacks."""
++    client = gateway_client()
++    if client is None:
++        raise ValidationError('Gateway not configured.')
++    try:
++        remote = client.payment.fetch(payment_id)
++    except Exception:
++        raise ValidationError('Cannot verify payment with gateway at this time.')
++    if (remote.get('status') != 'captured' or remote.get('order_id') != razorpay_order_id
++        or remote.get('currency') != 'INR'):
++        raise ValidationError('Payment is not verified as captured.')
++    with transaction.atomic():
++        attempt = get_object_or_404(RazorpayAttempt.objects.select_for_update(), gateway_order_id=razorpay_order_id)
++        order = Order.objects.select_for_update().get(pk=attempt.order_id)
++        if int(remote.get('amount') or 0) != attempt.amount_paise:
++            raise ValidationError('Payment amount mismatch.')
++        existing = Payment.objects.filter(gateway_payment_id=payment_id).first()
++        if existing:
++            if existing.order_id != order.pk:
++                raise ValidationError('Payment already belongs to a different order.')
++            return order
++        if order.status == Order.Status.CANCELLED:
++            raise ValidationError('Order cancelled. Manual payment reconciliation required.')
++        amount = Decimal(attempt.amount_paise) / Decimal('100')
++        if paid_amount(order) + amount > order.total:
++            raise ValidationError('Paid amount exceeds the order total. Reconciliation required.')
++        Payment.objects.create(order=order, amount=amount, method='razorpay',
++                   reference=payment_id, gateway_payment_id=payment_id)
++        attempt.status='paid'
++        attempt.save(update_fields=['status'])
++        return order
++
++
++class RazorpayVerifySerializer(serializers.Serializer):
++    razorpay_order_id = serializers.CharField(max_length=120)
++    razorpay_payment_id = serializers.CharField(max_length=120)
++    razorpay_signature = serializers.CharField(max_length=256)
++
++
++class RazorpayVerifyView(APIView):
++    permission_classes = [IsAuthenticated]
++    @extend_schema(request=RazorpayVerifySerializer, responses={200: OpenApiTypes.OBJECT})
++    def post(self, request, order_id):
++        if not can_operate(request.user):
++            return Response({'detail':'Insufficient permission.'}, status=403)
++        serializer = RazorpayVerifySerializer(data=request.data)
++        serializer.is_valid(raise_exception=True)
++        data=serializer.validated_data
++        attempt = get_object_or_404(RazorpayAttempt, gateway_order_id=data['razorpay_order_id'], order_id=order_id)
++        secret = os.environ.get('RAZORPAY_KEY_SECRET','')
++        expected=hmac.new(secret.encode(),
++            f"{attempt.gateway_order_id}|{data['razorpay_payment_id']}".encode(),hashlib.sha256).hexdigest()
++        if not secret or not hmac.compare_digest(expected,data['razorpay_signature']):
++            raise ValidationError('Invalid payment signature.')
++        order = _confirm_captured(attempt.gateway_order_id, data['razorpay_payment_id'])
++        return Response({'verified':True, 'order':OrderSerializer(order).data})
++
++
++class RazorpayWebhookView(APIView):
++    authentication_classes = []
++    permission_classes = [AllowAny]
++    @extend_schema(exclude=True)
++    def post(self, request):
++        secret = os.environ.get('RAZORPAY_WEBHOOK_SECRET','')
++        signature = request.headers.get('X-Razorpay-Signature','')
++        digest = hmac.new(secret.encode(), request.body, hashlib.sha256).hexdigest()
++        if not secret or not hmac.compare_digest(digest, signature):
++            return Response({'detail':'Invalid webhook signature.'},status=403)
++        try:
++            payload=json.loads(request.body)
++            if payload.get('event')=='payment.captured':
++                entity=payload['payload']['payment']['entity']
++                _confirm_captured(entity['order_id'],entity['id'])
++        except (ValueError, KeyError, TypeError, ValidationError):
++            return Response({'detail':'Webhook could not be reconciled.'},status=400)
++        return Response({'ok':True})
++
++
++class OrderInvoiceView(APIView):
++    permission_classes = [IsAuthenticated]
++    @extend_schema(responses={(200, "application/pdf"): OpenApiTypes.BINARY})
++    def get(self, request, order_id):
++        if not can_operate(request.user):
++            return Response({'detail':'Insufficient permission.'},status=403)
++        order = get_object_or_404(Order.objects.select_related('customer','created_by').prefetch_related('items__product'),pk=order_id)
++        buffer=io.BytesIO()
++        pdf=canvas.Canvas(buffer,pagesize=A4)
++        w,h=A4
++        def header():
++            pdf.setFillColor(colors.HexColor('#122943'))
++            pdf.rect(0,h-102,w,102,fill=1,stroke=0)
++            pdf.setFillColor(colors.white)
++            pdf.setFont('Helvetica-Bold',21)
++            pdf.drawString(42,h-49,os.environ.get('SMARTSTOCK_BUSINESS_NAME','SmartStock'))
++            pdf.setFont('Helvetica',10)
++            pdf.drawString(42,h-69,'SALES INVOICE  |  Demo document; not a GST tax invoice')
++            pdf.setFillColor(colors.black)
++        header()
++        pdf.setFont('Helvetica-Bold',12)
++        pdf.drawString(42,h-137, f"Invoice {order.number}")
++        pdf.setFont('Helvetica',10)
++        pdf.drawString(42,h-157,f"Date: {timezone.localtime(order.created_at).strftime('%d %b %Y')}")
++        pdf.drawString(42,h-176,f"Customer: {order.customer.name[:65]}")
++        pdf.drawString(42,h-195,f"Order: {order.status.title()}    Payment: {payment_state(order).title()}")
++        y=h-235
++        pdf.setFont('Helvetica-Bold',10)
++        pdf.drawString(42,y,'ITEM / SKU')
++        pdf.drawRightString(415,y,'QTY')
++        pdf.drawRightString(485,y,'RATE')
++        pdf.drawRightString(550,y,'TOTAL')
++        y-=12
++        pdf.line(42,y,550,y)
++        for item in order.items.all():
++            y-=25
++            if y<85:
++                pdf.showPage();header();y=h-135
++            pdf.setFont('Helvetica',9)
++            pdf.drawString(42,y,f"{item.product.name[:42]} ({item.product.sku[:20]})")
++            pdf.drawRightString(415,y,str(item.quantity))
++            pdf.drawRightString(485,y,f"{item.unit_price:,.2f}")
++            pdf.drawRightString(550,y,f"{item.subtotal:,.2f}")
++        if y<140:pdf.showPage();header();y=h-135
++        y-=28
++        pdf.line(42,y+16,550,y+16)
++        pdf.setFont('Helvetica-Bold',12)
++        pdf.drawString(42,y,'Grand total (INR)')
++        pdf.drawRightString(550,y,f"{order.total:,.2f}")
++        pdf.setFont('Helvetica',10)
++        pdf.drawString(42,y-24,f"Amount received: INR {paid_amount(order):,.2f}")
++        pdf.drawString(42,y-42,f"Balance due: INR {order.total-paid_amount(order):,.2f}")
++        pdf.setFont('Helvetica-Oblique',8)
++        pdf.drawString(42,55,'Internal assessment invoice. Add taxes, GSTIN and legal fields before real use.')
++        pdf.save()
++        response=HttpResponse(buffer.getvalue(),content_type='application/pdf')
++        response['Content-Disposition']=f'attachment; filename="{order.number}-invoice.pdf"'
++        response['Cache-Control']='private, no-store'
++        return response
+--- /dev/null
++++ b/backend/inventory/migrations/0002_payments.py
+@@ -0,0 +1,29 @@
++from decimal import Decimal
++from django.conf import settings
++from django.core.validators import MinValueValidator
++from django.db import migrations, models
++import django.db.models.deletion
++
++class Migration(migrations.Migration):
++    dependencies = [('inventory', '0001_initial'), migrations.swappable_dependency(settings.AUTH_USER_MODEL)]
++    operations = [
++        migrations.CreateModel(name='Payment', fields=[
++            ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++            ('amount', models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])),
++            ('method', models.CharField(max_length=16, choices=[('cash','Cash'),('upi','UPI'),('card','Card'),('bank','Bank transfer'),('razorpay','Razorpay')])),
++            ('reference', models.CharField(max_length=120, blank=True)),
++            ('gateway_payment_id', models.CharField(max_length=120, null=True, blank=True, unique=True)),
++            ('created_at', models.DateTimeField(auto_now_add=True)),
++            ('order', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='payments', to='inventory.order')),
++            ('recorded_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, null=True, blank=True, to=settings.AUTH_USER_MODEL)),
++        ], options={'ordering':['-created_at']}),
++        migrations.AddIndex(model_name='payment', index=models.Index(fields=['order','-created_at'], name='inventory_pay_order_idx')),
++        migrations.CreateModel(name='RazorpayAttempt', fields=[
++            ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++            ('gateway_order_id', models.CharField(max_length=120, unique=True)),
++            ('amount_paise', models.PositiveBigIntegerField()),
++            ('status', models.CharField(max_length=12, default='created', choices=[('created','Created'),('paid','Paid')])),
++            ('created_at', models.DateTimeField(auto_now_add=True)),
++            ('order', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='gateway_attempts', to='inventory.order')),
++        ], options={'ordering':['-created_at']}),
++    ]
+--- a/backend/inventory/models.py
++++ b/backend/inventory/models.py
+@@ -100,3 +100,32 @@
+     class Meta:
+         ordering = ['-created_at']
+         indexes = [models.Index(fields=['product', '-created_at'], name='inventory_m_product_date_idx')]
++
++class Payment(models.Model):
++    """Auditable receipts. Payment records never change inventory quantities."""
++    class Methods(models.TextChoices):
++        CASH = 'cash', 'Cash'
++        UPI = 'upi', 'UPI'
++        CARD = 'card', 'Card'
++        BANK = 'bank', 'Bank transfer'
++        RAZORPAY = 'razorpay', 'Razorpay'
++    order = models.ForeignKey(Order, on_delete=models.PROTECT, related_name='payments')
++    amount = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
++    method = models.CharField(max_length=16, choices=Methods.choices)
++    reference = models.CharField(max_length=120, blank=True)
++    gateway_payment_id = models.CharField(max_length=120, null=True, blank=True, unique=True)
++    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True)
++    created_at = models.DateTimeField(auto_now_add=True)
++    class Meta:
++        ordering = ['-created_at']
++        indexes = [models.Index(fields=['order', '-created_at'], name='inventory_pay_order_idx')]
++
++class RazorpayAttempt(models.Model):
++    """One gateway order per attempted checkout, for signature and amount reconciliation."""
++    order = models.ForeignKey(Order, on_delete=models.PROTECT, related_name='gateway_attempts')
++    gateway_order_id = models.CharField(max_length=120, unique=True)
++    amount_paise = models.PositiveBigIntegerField()
++    status = models.CharField(max_length=12, default='created', choices=[('created','Created'),('paid','Paid')])
++    created_at = models.DateTimeField(auto_now_add=True)
++    class Meta:
++        ordering = ['-created_at']
+--- a/backend/inventory/serializers.py
++++ b/backend/inventory/serializers.py
+@@ -1,3 +1,5 @@
++from decimal import Decimal
++from django.db.models import Sum
+ from rest_framework import serializers
+ from .models import Category, Supplier, Product, Customer, Order, OrderItem, StockMovement
+ 
+@@ -49,10 +51,21 @@
+     customer_name = serializers.CharField(source='customer.name', read_only=True)
+     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+     items = OrderItemSerializer(many=True, read_only=True)
++    paid_amount = serializers.SerializerMethodField()
++    payment_status = serializers.SerializerMethodField()
++    def _paid(self, obj):
++        if not hasattr(obj, '_cached_paid_amount'):
++            obj._cached_paid_amount = obj.payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
++        return obj._cached_paid_amount
++    def get_paid_amount(self, obj):
++        return str(self._paid(obj))
++    def get_payment_status(self, obj):
++        amount = self._paid(obj)
++        return 'paid' if amount >= obj.total else 'partial' if amount > 0 else 'unpaid'
+     class Meta:
+         model = Order
+         fields = ('id','number','customer','customer_name','status','total','notes','items',
+-                  'created_by_name','created_at','updated_at')
++                  'created_by_name','created_at','updated_at','paid_amount','payment_status')
+ 
+ class OrderLineInputSerializer(serializers.Serializer):
+     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.filter(is_active=True))
+--- a/backend/inventory/services.py
++++ b/backend/inventory/services.py
+@@ -57,6 +57,10 @@
+     elif status == 'cancelled':
+         if order.status != Order.Status.PLACED:
+             raise ValidationError('Only placed orders can be cancelled.')
++        # A financial refund is NOT the same as restoring stock.
++        # Do not silently cancel paid orders or unresolved gateway checkouts.
++        if order.payments.exists() or order.gateway_attempts.exists():
++            raise ValidationError('Resolve/refund recorded or pending payments before cancelling this order.')
+         for item in order.items.select_related('product').order_by('product_id'):
+             product = Product.objects.select_for_update().get(pk=item.product_id)
+             product.stock += item.quantity
+--- /dev/null
++++ b/backend/inventory/test_billing.py
+@@ -0,0 +1,70 @@
++from decimal import Decimal
++from django.contrib.auth import get_user_model
++from django.test import TestCase, override_settings
++from rest_framework.test import APIClient
++from .models import Category, Customer, Order, Payment, Product
++
++
++class BillingAddonTests(TestCase):
++    @classmethod
++    def setUpTestData(cls):
++        cls.manager = get_user_model().objects.create_user(
++            username='billing_manager', password='StrongBillPass123!', role='manager')
++        cls.user = get_user_model().objects.create_user(
++            username='billing_customer', password='StrongBillPass123!', role='user')
++        cls.category=Category.objects.create(name='Billing')
++        cls.product=Product.objects.create(name='Desk Lamp', sku='LAMP-1',category=cls.category,
++                             price=Decimal('500.00'),cost=Decimal('200'),stock=10)
++        cls.customer=Customer.objects.create(name='Alex Buyer')
++
++    def setUp(self):
++        self.client=APIClient()
++        self.client.force_authenticate(user=self.manager)
++        response=self.client.post('/api/orders/',{'customer':self.customer.pk,
++                 'items':[{'product':self.product.pk,'quantity':2}]},format='json')
++        self.assertEqual(response.status_code,201,response.data)
++        self.order_id=response.data['id']
++
++    def test_partial_then_full_manual_payment(self):
++        path=f'/api/orders/{self.order_id}/payments/'
++        r=self.client.post(path,{'amount':'400.00','method':'cash'},format='json')
++        self.assertEqual(r.status_code,201,r.data)
++        order=self.client.get(f'/api/orders/{self.order_id}/').data
++        self.assertEqual(order['payment_status'],'partial')
++        r=self.client.post(path,{'amount':'600.00','method':'upi','reference':'UPI-DEMO-1'},format='json')
++        self.assertEqual(r.status_code,201,r.data)
++        order=self.client.get(f'/api/orders/{self.order_id}/').data
++        self.assertEqual(order['payment_status'],'paid')
++        self.assertEqual(Decimal(order['paid_amount']),Decimal('1000.00'))
++        self.assertEqual(Payment.objects.filter(order_id=self.order_id).count(),2)
++
++    def test_rejects_overpayment_and_negative_payment(self):
++        path=f'/api/orders/{self.order_id}/payments/'
++        self.assertEqual(self.client.post(path,{'amount':'1000.01','method':'cash'}).status_code,400)
++        self.assertEqual(self.client.post(path,{'amount':'-1','method':'cash'}).status_code,400)
++
++    def test_paid_order_cannot_cancel_without_refund_workflow(self):
++        self.client.post(f'/api/orders/{self.order_id}/payments/',{'amount':'50.00','method':'cash'})
++        self.assertEqual(self.client.post(f'/api/orders/{self.order_id}/cancel/').status_code,400)
++        self.assertEqual(Order.objects.get(pk=self.order_id).status,'placed')
++
++    def test_invoice_is_pdf_and_private(self):
++        url=f'/api/orders/{self.order_id}/invoice/'
++        res=self.client.get(url)
++        self.assertEqual(res.status_code,200)
++        self.assertEqual(res['Content-Type'],'application/pdf')
++        self.assertTrue(res.content.startswith(b'%PDF'))
++        self.client.force_authenticate(user=self.user)
++        self.assertEqual(self.client.get(url).status_code,403)
++
++    def test_unconfigured_gateway_disallowed(self):
++        # This is a local-only test: don't contact Razorpay or use real money.
++        from unittest.mock import patch
++        with patch.dict('os.environ',{'RAZORPAY_KEY_ID':'','RAZORPAY_KEY_SECRET':''}):
++            res=self.client.post(f'/api/orders/{self.order_id}/razorpay/start/',{},format='json')
++        self.assertEqual(res.status_code,503)
++
++    def test_regular_user_cannot_record_payment(self):
++        self.client.force_authenticate(user=self.user)
++        res=self.client.post(f'/api/orders/{self.order_id}/payments/',{'amount':'10','method':'cash'})
++        self.assertEqual(res.status_code,403)
+--- a/backend/requirements.txt
++++ b/backend/requirements.txt
+@@ -8,3 +8,6 @@
+ python-dotenv>=1.0,<2
+ whitenoise>=6.8,<7
+ Gunicorn>=23,<25; sys_platform != "win32"
++
++reportlab>=4.2,<5
++razorpay>=1.4,<2
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -15,7 +15,9 @@
+     "react-dom": "^18.3.1",
+     "react-hot-toast": "^2.4.1",
+     "react-router-dom": "^6.28.0",
+-    "recharts": "^2.15.0"
++    "recharts": "^2.15.0",
++    "@zxing/browser": "^0.2.1",
++    "jsbarcode": "^3.12.1"
+   },
+   "devDependencies": {
+     "@types/react": "^18.3.18",
+@@ -25,6 +27,7 @@
+     "postcss": "^8.4.49",
+     "tailwindcss": "^3.4.17",
+     "typescript": "^5.7.3",
+-    "vite": "^6.0.5"
++    "vite": "^6.0.5",
++    "@types/jsbarcode": "^3.11.4"
+   }
+ }
+--- a/frontend/src/api.ts
++++ b/frontend/src/api.ts
+@@ -94,3 +94,18 @@
+     return all;
+   }
+ };
++
++/** Authenticated PDF download, with the same JWT refresh behavior as API calls. */
++export async function downloadInvoice(orderId:number, orderNumber:string):Promise<void> {
++  const url = `${BASE}/orders/${orderId}/invoice/`;
++  async function fetchPdf(token:string|null):Promise<Response> {
++    return fetch(url,{headers:token?{Authorization:`Bearer ${token}`}:{}});
++  }
++  let response=await fetchPdf(sessionStorage.getItem(ACCESS));
++  if(response.status===401 && await refreshTokens()) response=await fetchPdf(sessionStorage.getItem(ACCESS));
++  if(!response.ok) throw new Error(`Invoice download failed (${response.status})`);
++  const blob=await response.blob();
++  const fileUrl=URL.createObjectURL(blob);
++  const a=document.createElement('a');a.href=fileUrl;a.download=`${orderNumber}-invoice.pdf`;a.click();
++  window.setTimeout(()=>URL.revokeObjectURL(fileUrl),2500);
++}
+--- /dev/null
++++ b/frontend/src/components/BarcodeTools.tsx
+@@ -0,0 +1,52 @@
++import { useEffect, useRef, useState } from 'react';
++import JsBarcode from 'jsbarcode';
++import { BrowserMultiFormatReader } from '@zxing/browser';
++import { Button, Modal } from './UI';
++
++/** Code 128 inventory label; SKU is the code's canonical unique value. */
++export function BarcodeLabel({sku,name,onClose}:{sku:string;name:string;onClose:()=>void}){
++  const svgRef=useRef<SVGSVGElement>(null);
++  useEffect(()=>{
++    if(!svgRef.current)return;
++    try { JsBarcode(svgRef.current,sku,{format:'CODE128',displayValue:true,margin:18,height:78,width:2}); }
++    catch { /* SKU may contain characters that cannot be encoded */ }
++  },[sku]);
++  function download(){
++    if(!svgRef.current)return;
++    const blob=new Blob([new XMLSerializer().serializeToString(svgRef.current)],{type:'image/svg+xml;charset=utf-8'});
++    const href=URL.createObjectURL(blob);const a=document.createElement('a');a.href=href;
++    a.download=`barcode-${sku.replace(/[^A-Za-z0-9_-]/g,'_')}.svg`;a.click();
++    setTimeout(()=>URL.revokeObjectURL(href),1500);
++  }
++  return <Modal open onClose={onClose} title="Product barcode label" subtitle={`${name} • ${sku}`}>
++    <div className="barcode-preview"><svg ref={svgRef} aria-label={`Barcode for ${sku}`}/></div>
++    <p className="barcode-note">Code 128, based on your unique internal SKU. This is not a retail GTIN/EAN registration.</p>
++    <div className="form-actions"><Button variant="secondary" onClick={onClose}>Close</Button><Button onClick={download}>Download SVG label</Button></div>
++  </Modal>;
++}
++
++/** Requires localhost or HTTPS and the user's camera permission. */
++export function BarcodeScanner({onScan,onClose}:{onScan:(code:string)=>void;onClose:()=>void}){
++  const video=useRef<HTMLVideoElement>(null);
++  const [error,setError]=useState('');
++  const scan=useRef(onScan);scan.current=onScan;
++  const close=useRef(onClose);close.current=onClose;
++  useEffect(()=>{
++    let stopped=false;
++    let controls:{stop:()=>void}|null=null;
++    const reader=new BrowserMultiFormatReader();
++    if(!navigator.mediaDevices?.getUserMedia){setError('Camera requires HTTPS or localhost. You can use a USB scanner in the search field.');return;}
++    if(!video.current)return;
++    reader.decodeFromVideoDevice(undefined,video.current,(result)=>{
++      if(stopped || !result)return;
++      stopped=true;controls?.stop();scan.current(result.getText().trim());close.current();
++    }).then(c=>{controls=c;if(stopped)c.stop();}).catch(e=>{if(!stopped)setError((e as Error).message||'Camera unavailable');});
++    return ()=>{stopped=true;controls?.stop();};
++  },[]);
++  return <Modal open onClose={onClose} title="Scan product barcode" subtitle="Aim your camera at a Code 128 / EAN barcode">
++    <video className="barcode-camera" ref={video} autoPlay playsInline muted/>
++    {error&&<p className="barcode-error">{error}</p>}
++    <p className="barcode-note">A USB scanner also works: focus the product search box and scan.</p>
++    <div className="form-actions"><Button variant="secondary" onClick={onClose}>Close scanner</Button></div>
++  </Modal>;
++}
+--- a/frontend/src/components/UI.tsx
++++ b/frontend/src/components/UI.tsx
+@@ -8,7 +8,7 @@
+ export function Panel({children,className='',title,action}:{children:ReactNode;className?:string;title?:string;action?:ReactNode}){return <section className={`panel ${className}`}>{title&&<div className="panel-top"><h3>{title}</h3>{action}</div>}{children}</section>}
+ export function PageHeader({eyebrow,title,description,actions}:{eyebrow?:string;title:string;description:string;actions?:ReactNode}){return <div className="page-head"><div><div className="eyebrow">{eyebrow||'WORKSPACE'} <span className="eyebrow-line"/></div><h1>{title}</h1><p>{description}</p></div>{actions&&<div className="page-actions">{actions}</div>}</div>}
+ export function SearchBox({value,onChange,placeholder='Search...'}:{value:string;onChange:(s:string)=>void;placeholder?:string}){return <div className="searchbox"><Search size={17}/><input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>{value&&<button aria-label="Clear search" onClick={()=>onChange('')}><X size={15}/></button>}</div>}
+-export function Status({value}:{value:string}){const kind=['healthy','fulfilled','in'].includes(value)?'good':['low','placed'].includes(value)?'warn':['out','cancelled'].includes(value)?'bad':'neutral';return <span className={`status status-${kind}`}><span className="status-dot"/>{value.replaceAll('_',' ')}</span>}
++export function Status({value}:{value:string}){const kind=['healthy','fulfilled','in','paid'].includes(value)?'good':['low','placed','partial','unpaid'].includes(value)?'warn':['out','cancelled'].includes(value)?'bad':'neutral';return <span className={`status status-${kind}`}><span className="status-dot"/>{value.replaceAll('_',' ')}</span>}
+ export function Modal({open,onClose,title,subtitle,children,wide=false}:{open:boolean;onClose:()=>void;title:string;subtitle?:string;children:ReactNode;wide?:boolean}){if(!open)return null;return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section className={`modal ${wide?'modal-wide':''}`} role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><div><h2>{title}</h2>{subtitle&&<p>{subtitle}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={20}/></button></div><div className="modal-body">{children}</div></section></div>}
+ export function Field({label,children,required,hint}:{label:string;children:ReactNode;required?:boolean;hint?:string}){return <label className="field"><span>{label}{required&&<b> *</b>}</span>{children}{hint&&<small>{hint}</small>}</label>}
+ export function Select({value,onChange,children,disabled=false}:{value:string|number;onChange:(value:string)=>void;children:ReactNode;disabled?:boolean}){return <div className="select-wrap"><select value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}>{children}</select><ChevronDown size={16}/></div>}
+--- a/frontend/src/pages/Orders.tsx
++++ b/frontend/src/pages/Orders.tsx
+@@ -1,7 +1,7 @@
+ import { useEffect, useMemo, useState } from 'react';
+-import { CheckCircle2, ChevronRight, Download, Eye, Plus, ShoppingBag, Trash2, XCircle } from 'lucide-react';
++import { Banknote, CreditCard, FileDown, CheckCircle2, ChevronRight, Download, Eye, Plus, ShoppingBag, Trash2, XCircle } from 'lucide-react';
+ import toast from 'react-hot-toast';
+-import { api } from '../api';
++import { api, downloadInvoice } from '../api';
+ import { useAuth } from '../auth';
+ import { canManage, money, saveCsv, shortDate } from '../lib';
+ import type { Customer, Order, Product } from '../types';
+@@ -11,6 +11,10 @@
+ export default function OrdersPage(){
+  const {user}=useAuth();const [orders,setOrders]=useState<Order[]>([]);const [customers,setCustomers]=useState<Customer[]>([]);const [products,setProducts]=useState<Product[]>([]);
+  const [busy,setBusy]=useState(true);const [error,setError]=useState('');const [search,setSearch]=useState('');const [filter,setFilter]=useState('all');const [open,setOpen]=useState(false);const [details,setDetails]=useState<Order|null>(null);
++ const [paymentTarget,setPaymentTarget]=useState<Order|null>(null);
++ const [paymentAmount,setPaymentAmount]=useState('');
++ const [paymentMethod,setPaymentMethod]=useState('cash');
++ const [paymentRef,setPaymentRef]=useState('');
+  const [customer,setCustomer]=useState('');const [notes,setNotes]=useState('');const [lines,setLines]=useState<Line[]>([{product:'',quantity:'1'}]);const [saving,setSaving]=useState(false);const [cancelTarget,setCancelTarget]=useState<Order|null>(null);
+  async function load(){try{const [o,c,p]=await Promise.all([api.list<Order>('/orders/'),api.list<Customer>('/customers/'),api.list<Product>('/products/')]);setOrders(o);setCustomers(c);setProducts(p);setError('');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+  useEffect(()=>{void load();},[]);
+@@ -24,12 +28,26 @@
+   setSaving(true);try{await api.post('/orders/',{customer:Number(customer),notes,items});toast.success('Order placed and inventory updated');setOpen(false);await load();}catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
+  async function fulfill(o:Order){setSaving(true);try{await api.post(`/orders/${o.id}/fulfill/`,{});toast.success('Order marked fulfilled');setDetails(null);await load();}catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
+  async function cancel(){if(!cancelTarget)return;setSaving(true);try{await api.post(`/orders/${cancelTarget.id}/cancel/`,{});toast.success('Order cancelled and stock restored');setCancelTarget(null);setDetails(null);await load();}catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
++ function paymentOpen(o:Order){setPaymentTarget(o);setPaymentAmount((Number(o.total)-Number(o.paid_amount||0)).toFixed(2));setPaymentMethod('cash');setPaymentRef('');}
++ async function refreshDetails(id:number){const o=await api.get<Order>(`/orders/${id}/`);setDetails(o);await load();}
++ async function recordPayment(e:React.FormEvent){e.preventDefault();if(!paymentTarget)return;
++  setSaving(true);try{await api.post(`/orders/${paymentTarget.id}/payments/`,{amount:paymentAmount,method:paymentMethod,reference:paymentRef});toast.success('Payment recorded');setPaymentTarget(null);await refreshDetails(paymentTarget.id);}catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
++ async function razorpayPay(o:Order){setSaving(true);try{
++  const init=await api.post<{key_id:string;razorpay_order_id:string;amount:number;currency:string;name:string;description:string}>(`/orders/${o.id}/razorpay/start/`,{});
++  if(!(window as Window & {Razorpay?:unknown}).Razorpay){await new Promise<void>((resolve,reject)=>{const s=document.createElement('script');s.src='https://checkout.razorpay.com/v1/checkout.js';s.onload=()=>resolve();s.onerror=()=>reject(new Error('Could not load payment checkout'));document.body.appendChild(s);});}
++  type RazorpayResult={razorpay_order_id:string;razorpay_payment_id:string;razorpay_signature:string};
++  const Ctor=(window as unknown as {Razorpay:new(opts:Record<string,unknown>)=>{open:()=>void}}).Razorpay;
++  new Ctor({key:init.key_id,order_id:init.razorpay_order_id,amount:init.amount,currency:init.currency,name:init.name,description:init.description,handler:async (result:RazorpayResult)=>{try{await api.post(`/orders/${o.id}/razorpay/verify/`,result);toast.success('Test payment verified');await refreshDetails(o.id);}catch(err){toast.error((err as Error).message);}}}).open();
++ }catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
+  if(busy)return <Loading/>;if(error&&!orders.length)return <ErrorMessage error={error} retry={load}/>;
+- return <div className="page-stack"><PageHeader eyebrow="SALES OPERATIONS" title="Orders" description="Create orders, fulfill customer requests, and keep stock synchronized." actions={<><Button variant="secondary" icon={<Download size={16}/>} onClick={()=>saveCsv('smartstock-orders.csv',['Order','Customer','Status','Total','Date'],shown.map(o=>[o.number,o.customer_name,o.status,o.total,o.created_at]))}>Export CSV</Button><Button icon={<Plus size={16}/>} onClick={start}>Create order</Button></>}/>
++ return <div className="page-stack"><PageHeader eyebrow="SALES OPERATIONS" title="Orders" description="Create orders, fulfill customer requests, and keep stock synchronized." actions={<><Button variant="secondary" icon={<Download size={16}/>} onClick={()=>saveCsv('smartstock-orders.csv',['Order','Customer','Order status','Payment status','Paid amount','Total','Date'],shown.map(o=>[o.number,o.customer_name,o.status,o.payment_status,o.paid_amount,o.total,o.created_at]))}>Export CSV</Button><Button icon={<Plus size={16}/>} onClick={start}>Create order</Button></>}/>
+  <div className="order-kpis"><div><span>Total orders</span><strong>{orders.length}</strong></div><div><span>Placed</span><strong>{orders.filter(o=>o.status==='placed').length}</strong></div><div><span>Fulfilled</span><strong>{orders.filter(o=>o.status==='fulfilled').length}</strong></div><div><span>Active sales value</span><strong>{money(orders.filter(o=>o.status!=='cancelled').reduce((s,o)=>s+Number(o.total),0))}</strong></div></div>
+- <section className="panel table-panel"><div className="table-toolbar"><div><h3>All orders</h3><p>Follow every order from placement to fulfillment</p></div><div className="toolbar-actions"><SearchBox value={search} onChange={setSearch} placeholder="Order or customer..."/><Select value={filter} onChange={setFilter}><option value="all">All statuses</option><option value="placed">Placed</option><option value="fulfilled">Fulfilled</option><option value="cancelled">Cancelled</option></Select></div></div>{shown.length?<div className="table-scroller"><table className="data-table"><thead><tr><th>ORDER ID</th><th>CUSTOMER</th><th>ITEMS</th><th>DATE</th><th>TOTAL</th><th>STATUS</th><th className="th-right">VIEW</th></tr></thead><tbody>{shown.map(o=><tr key={o.id}><td className="code-cell">{o.number}</td><td className="td-strong">{o.customer_name}</td><td>{o.items.reduce((s,i)=>s+i.quantity,0)} units</td><td>{shortDate(o.created_at)}</td><td className="td-strong">{money(o.total)}</td><td><Status value={o.status}/></td><td><div className="row-actions"><button onClick={()=>setDetails(o)} aria-label={`View ${o.number}`}><Eye size={17}/><ChevronRight size={13}/></button></div></td></tr>)}</tbody></table></div>:<EmptyState title="No orders found" description="Create a new order to start recording sales." action={<Button icon={<Plus size={16}/>} onClick={start}>Create order</Button>}/>}</section>
++ <section className="panel table-panel"><div className="table-toolbar"><div><h3>All orders</h3><p>Follow every order from placement to fulfillment</p></div><div className="toolbar-actions"><SearchBox value={search} onChange={setSearch} placeholder="Order or customer..."/><Select value={filter} onChange={setFilter}><option value="all">All statuses</option><option value="placed">Placed</option><option value="fulfilled">Fulfilled</option><option value="cancelled">Cancelled</option></Select></div></div>{shown.length?<div className="table-scroller"><table className="data-table"><thead><tr><th>ORDER ID</th><th>CUSTOMER</th><th>ITEMS</th><th>DATE</th><th>TOTAL</th><th>ORDER</th><th>PAYMENT</th><th className="th-right">VIEW</th></tr></thead><tbody>{shown.map(o=><tr key={o.id}><td className="code-cell">{o.number}</td><td className="td-strong">{o.customer_name}</td><td>{o.items.reduce((s,i)=>s+i.quantity,0)} units</td><td>{shortDate(o.created_at)}</td><td className="td-strong">{money(o.total)}</td><td><Status value={o.status}/></td><td><Status value={o.payment_status||'unpaid'}/></td><td><div className="row-actions"><button onClick={()=>setDetails(o)} aria-label={`View ${o.number}`}><Eye size={17}/><ChevronRight size={13}/></button></div></td></tr>)}</tbody></table></div>:<EmptyState title="No orders found" description="Create a new order to start recording sales." action={<Button icon={<Plus size={16}/>} onClick={start}>Create order</Button>}/>}</section>
+  <Modal open={open} onClose={()=>setOpen(false)} title="Create sales order" subtitle="Stock is automatically deducted after a successful order." wide><form onSubmit={create} className="order-form"><div className="full"><Field label="Customer" required><Select value={customer} onChange={setCustomer}><option value="">Select customer</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>{!customers.length&&<small className="amber-text">Add a customer first on the Customers page.</small>}</div><div className="order-line-header"><strong>Order items</strong><button type="button" onClick={()=>setLines(p=>[...p,{product:'',quantity:'1'}])}><Plus size={15}/> Add line</button></div>{lines.map((l,i)=>{const product=products.find(p=>String(p.id)===l.product);return <div className="order-line" key={i}><div className="line-product"><Field label={`Product ${i+1}`} required><Select value={l.product} onChange={v=>setLine(i,{product:v})}><option value="">Choose product</option>{products.filter(p=>p.stock>0).map(p=><option key={p.id} value={p.id}>{p.name} ({p.stock} available)</option>)}</Select></Field></div><div className="line-qty"><Field label="Quantity" required><input type="number" min="1" max={product?.stock||1000000} step="1" required value={l.quantity} onChange={e=>setLine(i,{quantity:e.target.value})}/></Field></div><div className="line-price"><span>Subtotal</span><strong>{money(Number(product?.price||0)*Number(l.quantity||0))}</strong></div><button type="button" className="line-remove" disabled={lines.length===1} aria-label="Remove line" onClick={()=>setLines(p=>p.filter((_,j)=>j!==i))}><Trash2 size={17}/></button></div>})}<div className="order-note"><Field label="Order notes"><textarea rows={2} placeholder="Optional note for this order" value={notes} onChange={e=>setNotes(e.target.value)}/></Field></div><div className="order-total"><span>Order total</span><strong>{money(total)}</strong></div><FormActions onCancel={()=>setOpen(false)} busy={saving} text="Place order & update stock"/></form></Modal>
+- <Modal open={!!details} onClose={()=>setDetails(null)} title={details?.number||'Order details'} subtitle={`Placed ${shortDate(details?.created_at)}`}><div className="order-detail"><div className="order-detail-top"><span>Customer <strong>{details?.customer_name}</strong></span>{details&&<Status value={details.status}/>}</div><div className="order-detail-items"><h4>Order items</h4>{details?.items.map(i=><div key={i.id}><div><strong>{i.product_name}</strong><small>{i.quantity} × {money(i.unit_price)}</small></div><strong>{money(i.subtotal)}</strong></div>)}</div><div className="order-detail-total"><span>Total due</span><strong>{money(details?.total)}</strong></div>{details?.notes&&<p className="order-detail-note">Note: {details.notes}</p>}{details?.status==='placed'&&<div className="form-actions">{canManage(user?.role)&&<Button variant="danger" icon={<XCircle size={16}/>} onClick={()=>setCancelTarget(details)}>Cancel & restock</Button>}<Button icon={<CheckCircle2 size={16}/>} loading={saving} onClick={()=>fulfill(details)}>Mark fulfilled</Button></div>}</div></Modal>
++ <Modal open={!!details} onClose={()=>setDetails(null)} title={details?.number||'Order details'} subtitle={`Placed ${shortDate(details?.created_at)}`}><div className="order-detail"><div className="order-detail-top"><span>Customer <strong>{details?.customer_name}</strong></span>{details&&<Status value={details.status}/>}</div><div className="order-detail-items"><h4>Order items</h4>{details?.items.map(i=><div key={i.id}><div><strong>{i.product_name}</strong><small>{i.quantity} × {money(i.unit_price)}</small></div><strong>{money(i.subtotal)}</strong></div>)}</div><div className="order-detail-total"><span>Order total</span><strong>{money(details?.total)}</strong></div>
++ <div className="payment-summary"><div><span>Payment</span><strong>{details?.payment_status||'unpaid'}</strong></div><div><span>Received</span><strong>{money(details?.paid_amount||0)}</strong></div><div><span>Balance</span><strong>{money(Number(details?.total||0)-Number(details?.paid_amount||0))}</strong></div></div>
++ {details&&<div className="billing-actions"><Button variant="secondary" icon={<FileDown size={16}/>} onClick={()=>void downloadInvoice(details.id,details.number).catch(e=>toast.error((e as Error).message))}>Invoice PDF</Button>{details.status!=='cancelled'&&details.payment_status!=='paid'&&<><Button variant="secondary" icon={<Banknote size={16}/>} onClick={()=>paymentOpen(details)}>Record payment</Button><Button icon={<CreditCard size={16}/>} loading={saving} onClick={()=>void razorpayPay(details)}>Razorpay test</Button></>}</div>}{details?.notes&&<p className="order-detail-note">Note: {details.notes}</p>}{details?.status==='placed'&&<div className="form-actions">{canManage(user?.role)&&<Button variant="danger" icon={<XCircle size={16}/>} onClick={()=>setCancelTarget(details)}>Cancel & restock</Button>}<Button icon={<CheckCircle2 size={16}/>} loading={saving} onClick={()=>fulfill(details)}>Mark fulfilled</Button></div>}</div></Modal>
++ <Modal open={!!paymentTarget} onClose={()=>setPaymentTarget(null)} title={`Record payment • ${paymentTarget?.number}`} subtitle="Record a payment received outside SmartStock"><form onSubmit={recordPayment} className="form-grid"><Field label="Amount (INR)" required><input type="number" min="0.01" step="0.01" required value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)}/></Field><Field label="Payment method" required><Select value={paymentMethod} onChange={setPaymentMethod}><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="bank">Bank transfer</option></Select></Field><div className="full"><Field label="Transaction reference"><input maxLength={120} value={paymentRef} onChange={e=>setPaymentRef(e.target.value)} placeholder="Optional bank/UPI reference"/></Field></div><div className="full"><FormActions onCancel={()=>setPaymentTarget(null)} busy={saving} text="Record payment"/></div></form></Modal>
+  <Confirm open={!!cancelTarget} onClose={()=>setCancelTarget(null)} title="Cancel this order?" body={`Cancelling ${cancelTarget?.number} will return all ordered quantities to inventory. This action cannot be undone.`} busy={saving} onConfirm={cancel}/>
+  </div>;
+ }
+--- a/frontend/src/pages/Products.tsx
++++ b/frontend/src/pages/Products.tsx
+@@ -1,5 +1,6 @@
+ import { useEffect, useMemo, useState } from 'react';
+-import { Download, Edit3, PackagePlus, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
++import { Barcode, ScanLine, Download, Edit3, PackagePlus, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
++import { BarcodeLabel, BarcodeScanner } from '../components/BarcodeTools';
+ import toast from 'react-hot-toast';
+ import { api } from '../api';
+ import { useAuth } from '../auth';
+@@ -13,6 +14,8 @@
+  const {user}=useAuth();const editable=canManage(user?.role);
+  const [products,setProducts]=useState<Product[]>([]);const [categories,setCategories]=useState<Category[]>([]);const [suppliers,setSuppliers]=useState<Supplier[]>([]);
+  const [error,setError]=useState('');const [loading,setLoading]=useState(true);const [search,setSearch]=useState('');const [categoryFilter,setCategoryFilter]=useState('');const [stockFilter,setStockFilter]=useState('all');
++ const [labelProduct,setLabelProduct]=useState<Product|null>(null);
++ const [scanning,setScanning]=useState(false);
+  const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Product|null>(null);const [form,setForm]=useState<ProductForm>(emptyForm);const [saving,setSaving]=useState(false);const [deleting,setDeleting]=useState<Product|null>(null);
+  async function load(){try{const [p,c,s]=await Promise.all([api.list<Product>('/products/'),api.list<Category>('/categories/'),editable?api.list<Supplier>('/suppliers/'):Promise.resolve([] as Supplier[])]);setProducts(p);setCategories(c);setSuppliers(s);setError('');}catch(e){setError((e as Error).message);}finally{setLoading(false);}}
+  useEffect(()=>{void load();},[]);
+@@ -28,12 +31,14 @@
+  }catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
+  async function remove(){if(!deleting)return;setSaving(true);try{await api.del(`/products/${deleting.id}/`);toast.success('Product archived');setDeleting(null);await load();}catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
+  if(loading)return <Loading/>;if(error&&!products.length)return <ErrorMessage error={error} retry={load}/>;
+- return <div className="page-stack"><PageHeader eyebrow="CATALOG MANAGEMENT" title="Products" description="A complete view of every item in your inventory." actions={<><Button variant="secondary" icon={<Download size={16}/>} onClick={()=>saveCsv('smartstock-products.csv',['SKU','Product','Category','Stock','Price','Cost'],shown.map(p=>[p.sku,p.name,p.category_name,p.stock,p.price,p.cost]))}>Export CSV</Button>{editable&&<Button icon={<Plus size={16}/>} onClick={()=>begin()}>Add product</Button>}</>}/>
++ return <div className="page-stack"><PageHeader eyebrow="CATALOG MANAGEMENT" title="Products" description="A complete view of every item in your inventory." actions={<><Button variant="secondary" icon={<ScanLine size={16}/>} onClick={()=>setScanning(true)}>Scan barcode</Button><Button variant="secondary" icon={<Download size={16}/>} onClick={()=>saveCsv('smartstock-products.csv',['SKU','Product','Category','Stock','Price','Cost'],shown.map(p=>[p.sku,p.name,p.category_name,p.stock,p.price,p.cost]))}>Export CSV</Button>{editable&&<Button icon={<Plus size={16}/>} onClick={()=>begin()}>Add product</Button>}</>}/>
+  <div className="product-stat-strip"><div><span>Active products</span><strong>{number(products.length)}</strong></div><div><span>In stock</span><strong>{number(products.filter(p=>p.stock>0).length)}</strong></div><div><span>Low stock</span><strong className="amber-text">{number(products.filter(p=>p.stock_status==='low').length)}</strong></div><div><span>Out of stock</span><strong className="red-text">{number(products.filter(p=>p.stock_status==='out').length)}</strong></div></div>
+  <section className="panel table-panel"><div className="table-toolbar"><div><h3>Product catalog</h3><p>{shown.length} of {products.length} products</p></div><div className="toolbar-actions"><SearchBox value={search} onChange={setSearch} placeholder="Search name or SKU..."/><Select value={categoryFilter} onChange={setCategoryFilter}><option value="">All categories</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</Select><Select value={stockFilter} onChange={setStockFilter}><option value="all">All stock</option><option value="healthy">Healthy</option><option value="low">Low stock</option><option value="out">Out of stock</option></Select></div></div>
+- {shown.length?<div className="table-scroller"><table className="data-table"><thead><tr><th>PRODUCT</th><th>SKU</th><th>CATEGORY</th><th>PRICE</th><th>IN STOCK</th><th>STATUS</th>{editable&&<th className="th-right">ACTIONS</th>}</tr></thead><tbody>{shown.map(p=><tr key={p.id}><td><div className="product-cell"><ProductAvatar name={p.name} category={p.category_name}/><div><strong>{p.name}</strong><span>{p.description?.slice(0,54)||'Inventory product'}</span></div></div></td><td><span className="sku-cell">{p.sku}</span></td><td>{p.category_name}</td><td className="td-strong">{money(p.price)}</td><td><strong>{number(p.stock)}</strong> <span className="muted">units</span></td><td><Status value={p.stock_status}/></td>{editable&&<td><div className="row-actions"><button aria-label={`Edit ${p.name}`} onClick={()=>begin(p)}><Edit3 size={16}/></button><button aria-label={`Archive ${p.name}`} className="remove-btn" onClick={()=>setDeleting(p)}><Trash2 size={16}/></button></div></td>}</tr>)}</tbody></table></div>:<EmptyState title="No matching products" description="Clear the filters or add a new product to your catalog." action={editable?<Button icon={<Plus size={16}/>} onClick={()=>begin()}>Add product</Button>:undefined}/>}
++ {shown.length?<div className="table-scroller"><table className="data-table"><thead><tr><th>PRODUCT</th><th>SKU</th><th>CATEGORY</th><th>PRICE</th><th>IN STOCK</th><th>STATUS</th><th>BARCODE</th>{editable&&<th className="th-right">ACTIONS</th>}</tr></thead><tbody>{shown.map(p=><tr key={p.id}><td><div className="product-cell"><ProductAvatar name={p.name} category={p.category_name}/><div><strong>{p.name}</strong><span>{p.description?.slice(0,54)||'Inventory product'}</span></div></div></td><td><span className="sku-cell">{p.sku}</span></td><td>{p.category_name}</td><td className="td-strong">{money(p.price)}</td><td><strong>{number(p.stock)}</strong> <span className="muted">units</span></td><td><Status value={p.stock_status}/></td><td><button className="barcode-label-link" onClick={()=>setLabelProduct(p)}><Barcode size={15}/> Label</button></td>{editable&&<td><div className="row-actions"><button aria-label={`Edit ${p.name}`} onClick={()=>begin(p)}><Edit3 size={16}/></button><button aria-label={`Archive ${p.name}`} className="remove-btn" onClick={()=>setDeleting(p)}><Trash2 size={16}/></button></div></td>}</tr>)}</tbody></table></div>:<EmptyState title="No matching products" description="Clear the filters or add a new product to your catalog." action={editable?<Button icon={<Plus size={16}/>} onClick={()=>begin()}>Add product</Button>:undefined}/>}
+  <div className="table-bottom"><span>Showing {shown.length} products</span><span>Products with past orders are archived, never erased from history.</span></div></section>
+  <Modal open={open} onClose={()=>setOpen(false)} title={editing?'Edit product':'Add new product'} subtitle="Set the details for this catalog item." wide><form onSubmit={save} className="form-grid"><Field label="Product name" required><input required maxLength={180} value={form.name} onChange={e=>update('name',e.target.value)} placeholder="e.g. Wireless Headphones"/></Field><Field label="SKU" required><input required maxLength={64} value={form.sku} onChange={e=>update('sku',e.target.value.toUpperCase())} placeholder="e.g. AUD-1001"/></Field><Field label="Category" required><Select value={form.category} onChange={v=>update('category',v)}><option value="">Select category</option>{categories.map(c=><option value={c.id} key={c.id}>{c.name}</option>)}</Select></Field><Field label="Supplier"><Select value={form.supplier} onChange={v=>update('supplier',v)}><option value="">No supplier</option>{suppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</Select></Field><Field label="Selling price" required><input type="number" required min="0" step="0.01" value={form.price} onChange={e=>update('price',e.target.value)} placeholder="0.00"/></Field><Field label="Cost price" required><input type="number" required min="0" step="0.01" value={form.cost} onChange={e=>update('cost',e.target.value)} placeholder="0.00"/></Field><Field label="Low-stock alert threshold"><input type="number" required min="0" value={form.low_stock_threshold} onChange={e=>update('low_stock_threshold',e.target.value)}/></Field><Field label="Stock quantity"><div className="disabled-field">Managed via Inventory → Stock movements</div></Field><div className="field full"><span>Description</span><textarea rows={3} value={form.description} onChange={e=>update('description',e.target.value)} placeholder="Additional details about the product..."/></div><div className="full"><FormActions onCancel={()=>setOpen(false)} busy={saving} text={editing?'Save changes':'Create product'}/></div></form></Modal>
++ {labelProduct&&<BarcodeLabel sku={labelProduct.sku} name={labelProduct.name} onClose={()=>setLabelProduct(null)}/>}
++ {scanning&&<BarcodeScanner onScan={code=>{setSearch(code);setCategoryFilter('');setStockFilter('all');}} onClose={()=>setScanning(false)}/>}
+  <Confirm open={!!deleting} onClose={()=>setDeleting(null)} title="Archive this product?" body={`“${deleting?.name}” will be hidden from the active catalog. Existing orders and stock history will be preserved.`} busy={saving} onConfirm={remove}/>
+  </div>;
+ }
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -27,3 +27,16 @@
+ @media(max-width:1150px){.metric-grid,.inventory-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-row,.dashboard-row.bottom-row{grid-template-columns:1fr}.attention-panel .stock-health-ring{height:170px}.stock-legend{padding-bottom:3px}.needs-attention .attention-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px}.welcome-strip>a{display:none}.category-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+ @media(max-width:850px){.sidebar{transform:translateX(-100%);transition:transform .2s;width:260px}.sidebar-open{transform:translateX(0)}.sidebar-scrim{position:fixed;inset:0;background:#091627aa;z-index:55}.sidebar-close{display:grid;place-items:center;margin-left:auto;background:none;border:0;color:#aebed0}.main-area{margin-left:0}.mobile-menu{display:inline-flex;align-items:center;background:none;border:0;color:#607286;padding:4px}.topbar{height:70px}.header-date{display:none}.login-page{grid-template-columns:1fr}.login-visual{display:none}.mobile-login-brand{display:flex;align-items:center;gap:6px;font-weight:800;font-size:20px;margin-bottom:65px;color:#203751}.mobile-login-brand svg{color:#20bd90}.login-form-side{min-height:100vh}.login-greeting h2{font-size:26px}}
+ @media(max-width:620px){.main-content{padding:27px 16px 39px}.topbar{padding:0 16px}.topbar-divider,.topbar-bell,.user-chip>svg{display:none}.user-chip{padding-left:0;border-left:0;margin-left:0}.user-chip>div:nth-child(2){display:none}.page-head{align-items:flex-start;flex-direction:column}.page-head h1{font-size:23px}.page-actions{width:100%}.page-actions .btn{flex:1}.metric-grid,.inventory-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric{padding:15px 12px}.metric-icon{width:32px;height:32px}.metric-icon svg{width:18px}.metric>strong{font-size:19px;margin:10px 0}.metric-first>span:first-child{font-size:10px}.metric-foot{font-size:9px}.welcome-strip{padding:15px}.welcome-strip p{font-size:10px}.inventory-tile{padding:15px 11px;align-items:flex-start;flex-direction:column}.inventory-tile strong{font-size:20px}.product-stat-strip,.order-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.product-stat-strip>div,.order-kpis>div{padding:14px}.product-stat-strip strong,.order-kpis strong{font-size:19px}.table-toolbar{padding:17px}.toolbar-actions{width:100%}.toolbar-actions .searchbox{width:100%;min-width:0}.toolbar-actions .select-wrap{flex:1;min-width:115px}.panel-top{padding:18px 17px 0}.chart-summary{margin-left:17px}.stock-legend{margin:0 17px}.needs-attention .attention-list{grid-template-columns:1fr}.table-bottom{flex-direction:column}.date-range-panel{padding:14px}.date-fields{width:100%}.date-fields label{flex:1}.date-fields input{width:100%}.date-fields>.btn{width:100%}.category-grid{grid-template-columns:1fr;padding:16px}.app-footer{padding:17px 16px;flex-wrap:wrap;font-size:9px}.login-form-side{padding:32px 22px 70px}.login-form-wrap{max-width:420px}.form-grid{grid-template-columns:1fr}.modal-body{padding:20px}.modal-heading{padding:20px}.order-line{flex-wrap:wrap;position:relative;padding:12px;background:#f8fafc;border-radius:9px}.line-product{flex-basis:100%}.line-remove{position:absolute;right:7px;top:8px}.line-price{margin-left:auto}.form-actions .btn{flex:1}.topbar-left{gap:8px}}
++
++/* SmartStock barcode and payment extensions */
++.barcode-label-link{display:inline-flex;gap:6px;align-items:center;padding:7px 10px;border:1px solid var(--line,#dbe2ea);border-radius:8px;background:transparent;color:inherit;cursor:pointer}
++.barcode-preview{background:white;display:flex;justify-content:center;align-items:center;border:1px solid #e2e8f0;border-radius:12px;min-height:145px;overflow:auto;padding:12px}
++.barcode-preview svg{max-width:100%;height:auto}
++.barcode-camera{background:#121b29;width:100%;max-height:300px;aspect-ratio:16/9;object-fit:cover;border-radius:12px}
++.barcode-note{font-size:.81rem;color:#64748b;margin:14px 0}
++.barcode-error{color:#be123c;margin:10px 0}
++.payment-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 0;border-top:1px solid #e2e8f0}
++.payment-summary>div{display:flex;flex-direction:column;gap:5px}
++.payment-summary span{font-size:.75rem;color:#64748b}
++.payment-summary strong{text-transform:capitalize;font-size:.93rem;word-wrap:break-word}
++.billing-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+--- a/frontend/src/types.ts
++++ b/frontend/src/types.ts
+@@ -5,7 +5,7 @@
+ export interface Product { id: number; name: string; sku: string; description: string; category: number; category_name: string; supplier: number | null; supplier_name: string; price: string; cost: string; stock: number; low_stock_threshold: number; stock_status: 'healthy'|'low'|'out'; is_active: boolean; created_at: string; }
+ export interface Customer { id: number; name: string; email: string; phone: string; address: string; total_orders: number; created_at: string; }
+ export interface OrderItem { id: number; product: number; product_name: string; sku: string; quantity: number; unit_price: string; subtotal: string; }
+-export interface Order { id: number; number: string; customer: number; customer_name: string; status: 'placed'|'fulfilled'|'cancelled'; total: string; notes: string; items: OrderItem[]; created_by_name: string; created_at: string; }
++export interface Order { paid_amount: string; payment_status: 'unpaid'|'partial'|'paid'; id: number; number: string; customer: number; customer_name: string; status: 'placed'|'fulfilled'|'cancelled'; total: string; notes: string; items: OrderItem[]; created_by_name: string; created_at: string; }
+ export interface Movement { id: number; product: number; product_name: string; movement_type: 'in'|'out'|'sale'|'return'; quantity: number; note: string; order: number | null; performed_by_name: string; created_at: string; }
+ export interface Trend { date: string; sales: string|number; orders: number; }
+ export interface Dashboard { total_products: number; total_customers: number; stock_units: number; low_stock_count: number; total_orders: number; total_sales: string; stock_value: string; sales_trend: Trend[]; recent_orders: Order[]; low_stock_products: Product[]; }

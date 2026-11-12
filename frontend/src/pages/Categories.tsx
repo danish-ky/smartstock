@@ -1,0 +1,18 @@
+import { useEffect, useState } from 'react';
+import { Edit3, FolderTree, Plus, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { api } from '../api';
+import type { Category } from '../types';
+import { Button, Confirm, EmptyState, ErrorMessage, Field, FormActions, Loading, Modal, PageHeader } from '../components/UI';
+
+export default function CategoriesPage(){
+ const [items,setItems]=useState<Category[]>([]);const [busy,setBusy]=useState(true);const [error,setError]=useState('');
+ const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Category|null>(null);const [name,setName]=useState('');const [description,setDescription]=useState('');const [saving,setSaving]=useState(false);const [deleting,setDeleting]=useState<Category|null>(null);
+ async function load(){try{setItems(await api.list<Category>('/categories/'));setError('');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+ useEffect(()=>{void load();},[]);
+ function start(c?:Category){setEditing(c||null);setName(c?.name||'');setDescription(c?.description||'');setOpen(true);}
+ async function submit(e:React.FormEvent){e.preventDefault();setSaving(true);try{if(editing)await api.patch(`/categories/${editing.id}/`,{name,description});else await api.post('/categories/',{name,description});toast.success('Category saved');setOpen(false);await load();}catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
+ async function remove(){if(!deleting)return;setSaving(true);try{await api.del(`/categories/${deleting.id}/`);toast.success('Category deleted');setDeleting(null);await load();}catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}
+ if(busy)return <Loading/>;if(error)return <ErrorMessage error={error} retry={load}/>;
+ return <div className="page-stack"><PageHeader eyebrow="CATALOG ORGANIZATION" title="Categories" description="Organize your product catalog into meaningful groups." actions={<Button icon={<Plus size={16}/>} onClick={()=>start()}>Add category</Button>}/><section className="panel table-panel"><div className="table-toolbar"><div><h3>All categories</h3><p>{items.length} groups in your catalog</p></div></div>{items.length?<div className="category-grid">{items.map(c=><article className="category-card" key={c.id}><div className="category-card-icon"><FolderTree size={24}/></div><div><h3>{c.name}</h3><p>{c.description||'No description added yet.'}</p></div><div className="category-card-actions"><button onClick={()=>start(c)} aria-label={`Edit ${c.name}`}><Edit3 size={16}/></button><button onClick={()=>setDeleting(c)} aria-label={`Delete ${c.name}`}><Trash2 size={16}/></button></div></article>)}</div>:<EmptyState title="No categories yet" description="Create your first category to start adding products." action={<Button onClick={()=>start()} icon={<Plus size={16}/>}>Add category</Button>}/>}</section><Modal open={open} onClose={()=>setOpen(false)} title={editing?'Edit category':'New category'}><form onSubmit={submit} className="form-grid"><div className="full"><Field label="Category name" required><input required maxLength={120} value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Electronics"/></Field></div><div className="full"><Field label="Description"><textarea rows={3} value={description} onChange={e=>setDescription(e.target.value)} placeholder="What does this category include?"/></Field></div><div className="full"><FormActions onCancel={()=>setOpen(false)} busy={saving}/></div></form></Modal><Confirm open={!!deleting} onClose={()=>setDeleting(null)} onConfirm={remove} busy={saving} title="Delete category?" body="Categories assigned to products cannot be removed. Reassign affected products first."/></div>;
+}

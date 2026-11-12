@@ -1,0 +1,49 @@
+**/.env
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/*.sqlite3
+**/node_modules/
+**/dist/
+**/staticfiles/
+.DS_Store
+
+
+
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Django
+*.sqlite3
+media/
+staticfiles/
+*.log
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# React / React Native
+node_modules/
+dist/
+build/
+.expo/
+.next/
+coverage/
+
+# IDE
+.vscode/
+.idea/
+
+# Operating system
+.DS_Store
+Thumbs.db
