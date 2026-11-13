@@ -10,6 +10,7 @@ load_dotenv(BASE_DIR / '.env')
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'local-dev-only-insecure-change-me')
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost').split(',') if h.strip()]
+
 if not DEBUG and SECRET_KEY == 'local-dev-only-insecure-change-me':
     raise RuntimeError('Set DJANGO_SECRET_KEY for production')
 
