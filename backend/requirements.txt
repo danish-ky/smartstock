@@ -11,5 +11,4 @@ Pillow>=10.4,<13
 Gunicorn>=23,<25; sys_platform != "win32"
 
 reportlab>=4.2,<5
-razorpay>=1.4,<2
 razorpay==2.0.1
