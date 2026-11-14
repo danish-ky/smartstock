@@ -17,6 +17,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LoadNotice, Page, SectionTitle } from '../../components/MobileUI';
+import { OrevonScreenHero } from '../../components/OrevonScreenHero';
+import { ListFilters, ListMore, LoadedHint, StatusChip } from '../../components/OrevonListUI';
+import { useOrevonPages } from '../../lib/useOrevonPages';
 import { useAuth } from '../../context/AuthContext';
 import { listItems } from '../../lib/api';
 import { useRemote } from '../../lib/useRemote';
@@ -37,7 +40,7 @@ type Product = {
   stock_status?: string;
   image_url?: string | null;
 };
-type Payload = Product[] | { results?: Product[] };
+type Payload = Product[] | { results?: Product[]; next?: string | null };
 type Choice = { id: number; name: string };
 type ChoicePayload = Choice[] | { results?: Choice[] };
 type ProductForm = {
@@ -86,12 +89,19 @@ export default function ProductsScreen() {
   const { user, apiGet, apiPost, apiPatch, apiDelete, apiUpload } = useAuth();
   const canManage = user?.role === 'admin' || user?.role === 'manager';
   const { data, busy, error, reload } = useRemote<Payload>('/products/');
-  const products = listItems(data);
+  const { rows: products, moreAvailable: productsNext, loadingMore: productsMoreBusy, moreError: productsMoreError, loadMore: loadProductPage } =
+    useOrevonPages(data, '/products/', query => apiGet<Payload>(query));
   const [catalogSearch, setCatalogSearch] = useState('');
-  const filtered = products.filter(product =>
-    `${product.name} ${product.sku || ''} ${product.category_name || ''}`
-      .toLowerCase().includes(catalogSearch.trim().toLowerCase()),
-  );
+  const [stockFilter, setStockFilter] = useState('all');
+  const [catalogLimit, setCatalogLimit] = useState(8);
+  const filtered = products.filter(product => {
+    const matches = `${product.name} ${product.sku || ''} ${product.category_name || ''}`
+      .toLowerCase().includes(catalogSearch.trim().toLowerCase());
+    const stock = product.stock;
+    const out = typeof stock === 'number' && stock <= 0;
+    const low = typeof stock === 'number' && stock > 0 && stock <= (product.low_stock_threshold ?? 0);
+    return matches && (user?.role === 'user' || stockFilter === 'all' || (stockFilter === 'out' && out) || (stockFilter === 'low' && low) || (stockFilter === 'healthy' && typeof stock === 'number' && !out && !low));
+  });
   const [categories, setCategories] = useState<Choice[]>([]);
   const [suppliers, setSuppliers] = useState<Choice[]>([]);
   const [formOpen, setFormOpen] = useState(false);
@@ -334,6 +344,18 @@ export default function ProductsScreen() {
 
   return (
     <Page title="Products" subtitle="Live catalog & barcode lookup" refreshing={busy} onRefresh={reload}>
+      <OrevonScreenHero
+        eyebrow="PRODUCT CATALOG"
+        title="Your products"
+        description="Find, organize and manage every item in your catalog."
+        stats={[
+          { label: 'Loaded', value: products.length },
+          ...(user?.role === 'user' ? [] : [
+            { label: 'Low stock', value: products.filter(p => typeof p.stock === 'number' && p.stock > 0 && p.stock <= (p.low_stock_threshold ?? 0)).length },
+            { label: 'Out of stock', value: products.filter(p => p.stock === 0).length },
+          ]),
+        ]}
+      />
       {canManage && (
         <Pressable accessibilityRole="button" style={styles.createButton} onPress={() => openProductForm()}>
           <Text style={styles.actionText}>+ Add product</Text>
@@ -399,17 +421,21 @@ export default function ProductsScreen() {
       <LoadNotice loading={busy && !data} error={error} onRetry={reload} empty={!!data && !products.length} />
       {!!products.length && !error && (
         <>
-          <SectionTitle>Product catalog ({products.length})</SectionTitle>
+          <SectionTitle>Product catalog</SectionTitle>
           <TextInput
             accessibilityLabel="Search catalog"
             value={catalogSearch}
-            onChangeText={setCatalogSearch}
+            onChangeText={text => { setCatalogSearch(text); setCatalogLimit(8); }}
             style={[styles.input, styles.catalogSearch]}
             placeholder="Filter visible products by name or SKU"
             placeholderTextColor="#94A3B8"
           />
+          {user?.role !== 'user' && <ListFilters value={stockFilter} onChange={value => { setStockFilter(value); setCatalogLimit(8); }} items={[
+            { value: 'all', label: 'All' }, { value: 'low', label: 'Low stock' }, { value: 'out', label: 'Out of stock' }, { value: 'healthy', label: 'In stock' },
+          ]} />}
+          <LoadedHint text={`${Math.min(catalogLimit, filtered.length)} of ${filtered.length} matching loaded products${productsNext ? ' · More API pages available' : ''}. Filter searches loaded records; SKU lookup above searches the server.`} />
           {!filtered.length && <Text style={styles.helper}>No matching products in the loaded catalog.</Text>}
-          {filtered.map(product => (
+          {filtered.slice(0, catalogLimit).map(product => (
             <View key={product.id} style={styles.productCard}>
               <View style={styles.productTop}>
                 {product.image_url ? (
@@ -423,7 +449,10 @@ export default function ProductsScreen() {
                   <Text style={styles.metadata}>{product.category_name || 'Uncategorized'}</Text>
                   {product.price != null && <Text style={styles.productPrice}>₹{product.price}</Text>}
                   {user?.role !== 'user' && typeof product.stock === 'number' && (
-                    <Text style={styles.stock}>{product.stock} units · {product.stock_status || 'stock'}</Text>
+                    <View style={styles.productStockLine}>
+                      <Text style={[styles.stock, product.stock === 0 && styles.emptyStock]}>{product.stock} units</Text>
+                      <StatusChip label={product.stock === 0 ? 'Out of stock' : product.stock <= (product.low_stock_threshold ?? 0) ? 'Low stock' : 'In stock'} tone={product.stock === 0 ? 'danger' : product.stock <= (product.low_stock_threshold ?? 0) ? 'warning' : 'success'} />
+                    </View>
                   )}
                 </View>
               </View>
@@ -439,6 +468,9 @@ export default function ProductsScreen() {
               )}
             </View>
           ))}
+          {filtered.length > catalogLimit && <ListMore label="Show 8 more products" onPress={() => setCatalogLimit(value => value + 8)} />}
+          {!!productsMoreError && <Text style={styles.warning}>{productsMoreError}</Text>}
+          {productsNext && <ListMore label="Load next product page" busy={productsMoreBusy} onPress={() => { void loadProductPage(); }} />}
         </>
       )}
 
@@ -536,19 +568,19 @@ export default function ProductsScreen() {
 }
 
 const styles = StyleSheet.create({
-  lookupCard: { backgroundColor: '#FFFFFF', padding: 17, borderRadius: 16 },
-  lookupTitle: { color: '#0F172A', fontSize: 18, fontWeight: '800', marginBottom: 6 },
+  lookupCard: { backgroundColor: '#FFFFFF', padding: 19, borderRadius: 19, borderWidth: 1, borderColor: '#E6EBF1', shadowColor: '#12243A', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2, marginBottom: 7 },
+  lookupTitle: { color: '#12243A', fontSize: 18, fontWeight: '800', marginBottom: 7 },
   helper: { color: '#64748B', fontSize: 12, lineHeight: 19, marginBottom: 14 },
-  input: { color: '#0F172A', borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#F8FAFC', borderRadius: 10, padding: 13, fontSize: 15 },
+  input: { color: '#18283C', borderWidth: 1, borderColor: '#DFE6ED', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, fontSize: 15 },
   actions: { flexDirection: 'row', gap: 9, marginTop: 12 },
   action: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, paddingHorizontal: 7, borderRadius: 10 },
-  searchAction: { backgroundColor: '#0F766E' },
-  scanAction: { backgroundColor: '#059669' },
+  searchAction: { backgroundColor: '#12243A' },
+  scanAction: { backgroundColor: '#059A75' },
   disabled: { opacity: 0.55 },
   actionText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   warning: { color: '#B45309', fontSize: 12, lineHeight: 18, marginTop: 12 },
   resultProgress: { marginTop: 12 },
-  resultCard: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 12, padding: 14, marginTop: 15 },
+  resultCard: { backgroundColor: '#EFFAF5', borderWidth: 1, borderColor: '#A6E9CD', borderRadius: 14, padding: 15, marginTop: 15 },
   foundLabel: { color: '#047857', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   foundTitle: { color: '#064E3B', fontSize: 18, fontWeight: '800', marginTop: 6 },
   metadata: { color: '#065F46', fontSize: 13, marginTop: 5 },
@@ -561,28 +593,30 @@ const styles = StyleSheet.create({
   camera: { flex: 1, minHeight: 260, borderRadius: 16, overflow: 'hidden' },
   cameraHint: { color: '#D1FAE5', textAlign: 'center', fontSize: 12, marginVertical: 15 },
   closeButton: { backgroundColor: '#334155', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginBottom: 4 },
-  createButton: { backgroundColor: '#059669', alignItems: 'center', paddingVertical: 15, borderRadius: 12, marginBottom: 15 },
+  createButton: { backgroundColor: '#059A75', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 12, borderRadius: 13, marginBottom: 11 },
   catalogSearch: { marginBottom: 13 },
-  productCard: { backgroundColor: '#FFFFFF', borderRadius: 15, padding: 14, marginBottom: 10 },
+  productStockLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7, marginTop: 6 },
+  emptyStock: { color: '#B42336' },
+  productCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 15, marginBottom: 11, borderWidth: 1, borderColor: '#E6EBF1', shadowColor: '#12243A', shadowOpacity: 0.045, shadowRadius: 9, elevation: 2 },
   productTop: { flexDirection: 'row', gap: 12 },
   productCopy: { flex: 1 },
-  productImage: { width: 77, height: 81, borderRadius: 10, backgroundColor: '#F1F5F9' },
-  productImagePlaceholder: { width: 77, height: 81, borderRadius: 10, backgroundColor: '#E2E8F0', alignItems: 'center', justifyContent: 'center' },
+  productImage: { width: 80, height: 86, borderRadius: 13, backgroundColor: '#F1F5F9' },
+  productImagePlaceholder: { width: 80, height: 86, borderRadius: 13, backgroundColor: '#EDF7F3', alignItems: 'center', justifyContent: 'center' },
   imagePlaceholderText: { color: '#64748B', fontSize: 26 },
-  productTitle: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
-  productPrice: { color: '#047857', fontWeight: '700', marginTop: 6 },
+  productTitle: { fontSize: 15, fontWeight: '800', color: '#12243A' },
+  productPrice: { color: '#047857', fontWeight: '800', fontSize: 15, marginTop: 6 },
   productActions: { flexDirection: 'row', gap: 9, marginTop: 12 },
-  editButton: { flex: 1, backgroundColor: '#0F766E', borderRadius: 10, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
-  archiveButton: { flex: 1, backgroundColor: '#B91C1C', borderRadius: 10, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
-  formScreen: { flex: 1, backgroundColor: '#F1F5F9' },
+  editButton: { flex: 1, backgroundColor: '#12243A', borderRadius: 11, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  archiveButton: { flex: 1, backgroundColor: '#B74B52', borderRadius: 11, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+  formScreen: { flex: 1, backgroundColor: '#F5F8FC' },
   formContent: { padding: 20, paddingBottom: 40 },
   formHelp: { color: '#64748B', fontSize: 12, marginTop: 7, marginBottom: 22, lineHeight: 18 },
   fieldGroup: { marginBottom: 14 },
-  fieldLabel: { color: '#0F172A', fontWeight: '700', fontSize: 13, marginBottom: 7 },
+  fieldLabel: { color: '#18283C', fontWeight: '700', fontSize: 13, marginBottom: 7 },
   multiline: { minHeight: 90, textAlignVertical: 'top' },
   choiceList: { flexGrow: 0, marginBottom: 18 },
-  choiceChip: { backgroundColor: '#FFFFFF', paddingVertical: 9, paddingHorizontal: 14, borderRadius: 18, marginRight: 8, borderWidth: 1, borderColor: '#CBD5E1' },
-  chosenChip: { backgroundColor: '#D1FAE5', borderColor: '#059669' },
+  choiceChip: { backgroundColor: '#FFFFFF', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 19, marginRight: 8, borderWidth: 1, borderColor: '#DFE6ED' },
+  chosenChip: { backgroundColor: '#E3F7EF', borderColor: '#059A75' },
   choiceText: { color: '#334155', fontWeight: '600', fontSize: 12 },
   chosenText: { color: '#047857' },
   previewImage: { width: 160, height: 140, borderRadius: 12, backgroundColor: '#FFFFFF', marginBottom: 10 },

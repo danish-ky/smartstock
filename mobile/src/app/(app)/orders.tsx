@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,9 +13,12 @@ import {
   View,
 } from 'react-native';
 import { InfoCard, LoadNotice, Page, SectionTitle } from '../../components/MobileUI';
+import { ListFilters, ListMore, ListSearch, LoadedHint, StatusChip } from '../../components/OrevonListUI';
+import { useOrevonPages } from '../../lib/useOrevonPages';
 import { useAuth } from '../../context/AuthContext';
 import { listItems } from '../../lib/api';
 import { useRemote } from '../../lib/useRemote';
+import RazorpayTestCheckout, { type RazorpayTestSession, type RazorpayCheckoutEvent, isValidTestSession } from '../../components/RazorpayTestCheckout';
 
 type Item = {
   id?: number;
@@ -37,7 +40,7 @@ type Order = {
   created_at?: string;
   items?: Item[];
 };
-type Customer = { id: number; name: string; email?: string };
+type Customer = { id: number; name: string; email?: string; phone?: string };
 type Product = {
   id: number;
   name: string;
@@ -92,13 +95,31 @@ function labelStatus(status: string | undefined) {
   return (status || 'unknown').replace(/_/g, ' ').replace(/^./, letter => letter.toUpperCase());
 }
 
+// DRF pagination can return a full URL. Pass only its query parameters
+// to our authenticated, configured API origin; never follow arbitrary URLs.
+function nextCustomerPageQuery(payload: ListPayload<Customer>): string | null {
+  if (Array.isArray(payload) || !payload.next) return null;
+  const question = payload.next.indexOf('?');
+  if (question === -1) return null;
+  return payload.next.slice(question + 1).split('#')[0] || null;
+}
+
 export default function OrdersScreen() {
   const { user, apiGet, apiPost, apiOpenPdf } = useAuth();
   const isCustomer = user?.role === 'user';
   const canOperate = ['admin', 'manager', 'staff'].includes(user?.role ?? '');
   const path = isCustomer ? '/my/orders/' : '/orders/';
   const { data, busy, error, reload } = useRemote<ListPayload<Order>>(path);
-  const orders = useMemo(() => listItems(data), [data]);
+  const { rows: orders, moreAvailable: ordersNext, loadingMore: ordersMoreBusy, moreError: ordersMoreError, loadMore: loadOrderPage } =
+    useOrevonPages(data, path, query => apiGet<ListPayload<Order>>(query));
+  const [orderSearch, setOrderSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [ordersLimit, setOrdersLimit] = useState(10);
+  const filteredOrders = useMemo(() => orders.filter(order => {
+    const query = orderSearch.trim().toLowerCase();
+    return (!query || `${order.number || ''} ${order.customer_name || ''} ${order.id}`.toLowerCase().includes(query)) &&
+      (statusFilter === 'all' || (order.status || '').toLowerCase() === statusFilter);
+  }), [orders, orderSearch, statusFilter]);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [lookupBusy, setLookupBusy] = useState(false);
@@ -107,6 +128,12 @@ export default function OrdersScreen() {
   const [products, setProducts] = useState<Product[]>([]);
   const [limitedList, setLimitedList] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [customerMatches, setCustomerMatches] = useState<Customer[]>([]);
+  const [customerNextQuery, setCustomerNextQuery] = useState<string | null>(null);
+  const [customerPickerBusy, setCustomerPickerBusy] = useState(false);
+  const [customerPickerError, setCustomerPickerError] = useState('');
+  const customerSearchGeneration = useRef(0);
   const [productSearch, setProductSearch] = useState('');
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [quantities, setQuantities] = useState<Record<number, number>>({});
@@ -128,14 +155,16 @@ export default function OrdersScreen() {
   const [recordError, setRecordError] = useState('');
   const [requiresPaymentRefresh, setRequiresPaymentRefresh] = useState(false);
   const [invoiceBusy, setInvoiceBusy] = useState(false);
+  const [checkout, setCheckout] = useState<RazorpayTestSession | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutVerifying, setCheckoutVerifying] = useState(false);
+  const checkoutLock = useRef(false);
 
   const orderTotalPaise = paise(selected?.total);
   const paidPaise = paise(payments?.paid_amount);
   const outstandingPaise = orderTotalPaise !== null && paidPaise !== null
     ? Math.max(0, orderTotalPaise - paidPaise) : null;
 
-  const filteredCustomers = useMemo(() => customers.filter(c =>
-    `${c.name} ${c.email ?? ''}`.toLowerCase().includes(customerSearch.trim().toLowerCase())), [customers, customerSearch]);
   const filteredProducts = useMemo(() => products.filter(p =>
     `${p.name} ${p.sku ?? ''}`.toLowerCase().includes(productSearch.trim().toLowerCase())), [products, productSearch]);
   const lines = useMemo(() => products.filter(p => (quantities[p.id] ?? 0) > 0).map(p => ({
@@ -150,9 +179,69 @@ export default function OrdersScreen() {
     total + (Number.isFinite(line.unitPrice) ? line.unitPrice * line.quantity : 0), 0);
   const chosenCustomer = customers.find(c => c.id === customerId);
 
+  // Search server-side so the picker can find customers beyond the first API page.
+  // A generation number discards responses from older search terms / closed pickers.
+  useEffect(() => {
+    if (!customerPickerOpen || !createOpen || !canOperate) return;
+    const generation = ++customerSearchGeneration.current;
+    setCustomerMatches([]);
+    setCustomerNextQuery(null);
+    setCustomerPickerBusy(true);
+    setCustomerPickerError('');
+    const timer = setTimeout(() => {
+      const query = encodeURIComponent(customerSearch.trim());
+      void apiGet<ListPayload<Customer>>(`/customers/?search=${query}`)
+        .then(payload => {
+          if (generation !== customerSearchGeneration.current) return;
+          setCustomerMatches(listItems(payload));
+          setCustomerNextQuery(nextCustomerPageQuery(payload));
+        })
+        .catch(error => {
+          if (generation !== customerSearchGeneration.current) return;
+          setCustomerPickerError(errorText(error));
+        })
+        .finally(() => {
+          if (generation === customerSearchGeneration.current) setCustomerPickerBusy(false);
+        });
+    }, 250);
+    return () => { clearTimeout(timer); customerSearchGeneration.current++; };
+  }, [apiGet, canOperate, createOpen, customerPickerOpen, customerSearch]);
+
+  async function loadMoreCustomers() {
+    if (!customerNextQuery || customerPickerBusy || !customerPickerOpen) return;
+    const generation = customerSearchGeneration.current;
+    const query = customerNextQuery;
+    setCustomerPickerBusy(true);
+    setCustomerPickerError('');
+    try {
+      const payload = await apiGet<ListPayload<Customer>>(`/customers/?${query}`);
+      if (generation !== customerSearchGeneration.current) return;
+      const more = listItems(payload);
+      setCustomerMatches(previous => {
+        const known = new Set(previous.map(customer => customer.id));
+        return [...previous, ...more.filter(customer => !known.has(customer.id))];
+      });
+      setCustomerNextQuery(nextCustomerPageQuery(payload));
+    } catch (error) {
+      if (generation === customerSearchGeneration.current) setCustomerPickerError(errorText(error));
+    } finally {
+      if (generation === customerSearchGeneration.current) setCustomerPickerBusy(false);
+    }
+  }
+
+  function selectCustomer(customer: Customer) {
+    // Keep the chosen customer available for existing order confirmation logic.
+    setCustomers(current => current.some(item => item.id === customer.id) ? current : [...current, customer]);
+    setCustomerId(customer.id);
+    setCustomerPickerOpen(false);
+    setFormError('');
+  }
+
   async function openCreate() {
     if (!canOperate) return;
     setCreateOpen(true);
+    setCustomerPickerOpen(false);
+    setCustomerMatches([]);
     setLookupBusy(true);
     setLookupError('');
     setFormError('');
@@ -168,8 +257,8 @@ export default function OrdersScreen() {
       ]);
       setCustomers(listItems(customerPayload));
       setProducts(listItems(productPayload).filter(p => p.is_active !== false));
-      setLimitedList(Boolean((!Array.isArray(customerPayload) && customerPayload.next) ||
-        (!Array.isArray(productPayload) && productPayload.next)));
+      // Customer picker searches the entire directory; products remain first-page limited.
+      setLimitedList(Boolean(!Array.isArray(productPayload) && productPayload.next));
     } catch (e) {
       setLookupError(errorText(e));
     } finally {
@@ -380,6 +469,77 @@ export default function OrdersScreen() {
     }
   }
 
+  async function startRazorpayTestCheckout() {
+    if (!canOperate || !selected || selected.status === 'cancelled' ||
+      acting || detailBusy || checkoutBusy || checkoutVerifying || writeLock.current ||
+      !!detailError || requiresPaymentRefresh || !payments ||
+      outstandingPaise === null || outstandingPaise <= 0) return;
+    const target = selected;
+    setCheckoutBusy(true);
+    setRecordError('');
+    try {
+      // The backend alone determines the outstanding amount and creates the Razorpay order.
+      const init = await apiPost<Omit<RazorpayTestSession, 'orderId' | 'orderLabel'>>(
+        `/orders/${target.id}/razorpay/start/`, {},
+      );
+      const session: RazorpayTestSession = {
+        ...init, orderId: target.id, orderLabel: target.number || `Order #${target.id}`,
+      };
+      if (!isValidTestSession(session)) throw new Error('The server did not return valid Razorpay TEST checkout details.');
+      setCheckout(session);
+    } catch (error) {
+      Alert.alert('TEST checkout unavailable', errorText(error));
+    } finally {
+      setCheckoutBusy(false);
+    }
+  }
+
+  function closeRazorpayTestCheckout() {
+    if (checkoutVerifying || checkoutLock.current) return;
+    setCheckout(null);
+    if (selected) void loadDetail(selected);
+    Alert.alert('Checkout closed', 'No payment was marked as received by this action. Refresh payment history before retrying or recording a manual payment.');
+  }
+
+  async function onRazorpayCheckoutEvent(message: RazorpayCheckoutEvent) {
+    const session = checkout;
+    if (!session || checkoutLock.current) return;
+    if (message.type === 'dismiss') { closeRazorpayTestCheckout(); return; }
+    if (message.type === 'failed' || message.type === 'error') {
+      Alert.alert('Razorpay TEST checkout', message.message || 'The payment was not completed.');
+      return;
+    }
+    if (message.razorpay_order_id !== session.razorpay_order_id ||
+      !/^pay_[a-zA-Z0-9_-]+$/.test(message.razorpay_payment_id) ||
+      !/^[a-fA-F0-9]{64}$/.test(message.razorpay_signature)) {
+      Alert.alert('Invalid checkout response', 'The payment response could not be validated. Refresh payment history.');
+      return;
+    }
+    checkoutLock.current = true;
+    setCheckoutVerifying(true);
+    try {
+      // Never trust WebView success alone: Django checks the HMAC signature,
+      // gateway capture status, exact amount and idempotency before recording payment.
+      await apiPost(`/orders/${session.orderId}/razorpay/verify/`, {
+        razorpay_order_id: session.razorpay_order_id,
+        razorpay_payment_id: message.razorpay_payment_id,
+        razorpay_signature: message.razorpay_signature,
+      });
+      setCheckout(null);
+      await loadDetail({id:session.orderId});
+      await reload();
+      Alert.alert('Payment verified', 'Razorpay TEST payment was verified by Django. The payment history and balance have been refreshed.');
+    } catch (error) {
+      setCheckout(null);
+      setRequiresPaymentRefresh(true);
+      Alert.alert('Payment verification needs attention',
+        `${errorText(error)}\n\nDo not record another payment until you refresh history and reconcile the Razorpay attempt.`);
+    } finally {
+      checkoutLock.current = false;
+      setCheckoutVerifying(false);
+    }
+  }
+
   async function openInvoice(order: Order) {
     if (invoiceBusy) return;
     setInvoiceBusy(true);
@@ -407,31 +567,115 @@ export default function OrdersScreen() {
       <LoadNotice loading={busy && !data} error={error} onRetry={reload} empty={!!data && !orders.length} />
       {!!orders.length && !error && (
         <>
-          <SectionTitle>{orders.length} {isCustomer ? 'my orders' : 'orders'}</SectionTitle>
-          {orders.map(order => (
-            <Pressable
+          <SectionTitle>{isCustomer ? 'My orders' : 'Sales orders'}</SectionTitle>
+          <ListSearch label="Search loaded orders" placeholder="Order number or customer" value={orderSearch} onChangeText={value => { setOrderSearch(value); setOrdersLimit(10); }} />
+          <ListFilters value={statusFilter} onChange={value => { setStatusFilter(value); setOrdersLimit(10); }} items={[
+            { value: 'all', label: 'All' }, { value: 'placed', label: 'Placed' }, { value: 'fulfilled', label: 'Fulfilled' }, { value: 'cancelled', label: 'Cancelled' },
+          ]} />
+          <LoadedHint text={`${Math.min(ordersLimit, filteredOrders.length)} of ${filteredOrders.length} matching loaded orders${ordersNext ? ' · More API pages available' : ''}. Search filters loaded records only.`} />
+          {filteredOrders.length === 0 && <Text style={styles.listEmpty}>No matching orders in the loaded list.</Text>}
+          {filteredOrders.slice(0, ordersLimit).map(order => {
+            const status = (order.status || '').toLowerCase();
+            const tone = status === 'fulfilled' ? 'success' : status === 'cancelled' ? 'danger' : status === 'placed' ? 'info' : 'neutral';
+            const date = order.created_at ? new Date(order.created_at) : null;
+            const when = date && !Number.isNaN(date.valueOf()) ? date.toLocaleDateString('en-IN') : '';
+            return <Pressable
               key={order.id}
               accessibilityRole="button"
               accessibilityLabel={`View ${order.number || `order ${order.id}`}`}
               onPress={() => showOrder(order)}
+              style={styles.orderCard}
             >
-              <InfoCard
-                title={order.number || `Order #${order.id}`}
-                detail={`${order.customer_name && !isCustomer ? `${order.customer_name} · ` : ''}${labelStatus(order.status)} · Tap for details`}
-                trailing={amount(order.total)}
-              />
-            </Pressable>
-          ))}
+              <View style={styles.orderHeading}>
+                <View style={styles.orderTitleWrap}>
+                  <Text style={styles.orderNumber}>{order.number || `Order #${order.id}`}</Text>
+                  {!isCustomer && <Text style={styles.orderCustomer} numberOfLines={1}>{order.customer_name || 'Customer not provided'}</Text>}
+                </View>
+                <Text style={styles.orderTotal}>{amount(order.total)}</Text>
+              </View>
+              <View style={styles.orderFooter}>
+                <StatusChip label={labelStatus(order.status)} tone={tone} />
+                {!!order.payment_status && <StatusChip label={labelStatus(order.payment_status)} tone={order.payment_status === 'paid' ? 'success' : order.payment_status === 'partial' ? 'warning' : 'neutral'} />}
+                <View style={styles.orderSpacer} />
+                {!!when && <Text style={styles.orderDate}>{when}</Text>}
+                <Text style={styles.orderArrow}>›</Text>
+              </View>
+            </Pressable>;
+          })}
+          {filteredOrders.length > ordersLimit && <ListMore label="Show 10 more orders" onPress={() => setOrdersLimit(value => value + 10)} />}
+          {!!ordersMoreError && <Text style={styles.error}>{ordersMoreError}</Text>}
+          {ordersNext && <ListMore label="Load next orders page" busy={ordersMoreBusy} onPress={() => { void loadOrderPage(); }} />}
         </>
       )}
       {!isCustomer && <Text style={styles.hint}>Creating an order reserves stock immediately. Pull down to refresh this list.</Text>}
 
       {/* Operator-only create order dialog; customers never load its data. */}
-      <Modal visible={createOpen && canOperate} animationType="slide" onRequestClose={() => { if (!saving) setCreateOpen(false); }}>
+      <Modal visible={createOpen && canOperate} animationType="slide" onRequestClose={() => {
+        if (saving) return;
+        if (customerPickerOpen) setCustomerPickerOpen(false);
+        else setCreateOpen(false);
+      }}>
         <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          {customerPickerOpen ? (
+            <View style={styles.pickerScreen}>
+              <View style={styles.pickerHeader}>
+                <View style={styles.pickerHeaderContent}>
+                  <Text style={styles.brandEyebrow}>OREVON / SALES</Text>
+                  <Text style={styles.pickerTitle}>Select customer</Text>
+                  <Text style={styles.pickerSubtitle}>Find a customer by name, email or phone.</Text>
+                </View>
+                <Pressable accessibilityRole="button" accessibilityLabel="Back to new order" onPress={() => setCustomerPickerOpen(false)} style={styles.pickerClose}>
+                  <Text style={styles.closeText}>Done</Text>
+                </Pressable>
+              </View>
+              <TextInput
+                style={styles.pickerSearch}
+                accessibilityLabel="Search customer directory"
+                placeholder="Search name, email or phone"
+                placeholderTextColor="#94A3B8"
+                value={customerSearch}
+                onChangeText={setCustomerSearch}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+              />
+              {!!customerPickerError && <Text style={styles.error}>{customerPickerError}</Text>}
+              <ScrollView style={styles.pickerResults} contentContainerStyle={styles.pickerResultsContent} keyboardShouldPersistTaps="always">
+                {!customerPickerBusy && !customerMatches.length && !customerPickerError && (
+                  <Text style={styles.emptyMessage}>No matching customers. Try another search or add a customer from the Customers screen.</Text>
+                )}
+                {customerMatches.map(customer => (
+                  <Pressable
+                    key={customer.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Select customer ${customer.name}`}
+                    onPress={() => selectCustomer(customer)}
+                    style={[styles.pickerResult, customerId === customer.id && styles.pickerResultSelected]}
+                  >
+                    <View style={styles.customerAvatar}><Text style={styles.customerInitial}>{customer.name.trim().charAt(0).toUpperCase() || 'C'}</Text></View>
+                    <View style={styles.pickerResultContent}>
+                      <Text style={styles.choiceTitle}>{customer.name}</Text>
+                      {!!customer.email && <Text style={styles.choiceMeta}>{customer.email}</Text>}
+                      {!!customer.phone && <Text style={styles.choiceMeta}>{customer.phone}</Text>}
+                    </View>
+                    <Text style={styles.selectedMark}>{customerId === customer.id ? '✓' : '›'}</Text>
+                  </Pressable>
+                ))}
+                {customerPickerBusy && <ActivityIndicator color="#059669" style={{ marginVertical: 18 }} />}
+                {!!customerNextQuery && !customerPickerBusy && (
+                  <Pressable accessibilityRole="button" onPress={() => { void loadMoreCustomers(); }} style={styles.loadMoreButton}>
+                    <Text style={styles.loadMoreText}>Load more customers</Text>
+                  </Pressable>
+                )}
+              </ScrollView>
+            </View>
+          ) : (
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>New sales order</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.brandEyebrow}>OREVON / SALES</Text>
+                <Text style={styles.modalTitle}>New sales order</Text>
+              </View>
               <Pressable disabled={saving} onPress={() => setCreateOpen(false)} accessibilityRole="button"><Text style={styles.closeText}>Close</Text></Pressable>
             </View>
             <Text style={styles.hint}>Orders immediately reduce stock. Use demo products for your first test.</Text>
@@ -439,29 +683,22 @@ export default function OrdersScreen() {
             {!!lookupError && <Text style={styles.error}>{lookupError}</Text>}
             {!lookupBusy && !lookupError && (
               <>
-                {limitedList && <Text style={styles.warning}>This form shows only the first API page of customers/products. Use Orevon Web if an item is missing.</Text>}
-                <SectionTitle>1. Select customer</SectionTitle>
-                <TextInput
-                  style={styles.input}
-                  accessibilityLabel="Search customers"
-                  placeholder="Search customers"
-                  value={customerSearch}
-                  onChangeText={setCustomerSearch}
-                  autoCorrect={false}
-                />
-                {!filteredCustomers.length && <Text style={styles.hint}>No customers found. Create a customer in Orevon Web first.</Text>}
-                {filteredCustomers.map(customer => (
-                  <Pressable
-                    key={customer.id}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: customerId === customer.id }}
-                    onPress={() => { setCustomerId(customer.id); setFormError(''); }}
-                    style={[styles.choice, customerId === customer.id && styles.choiceSelected]}
-                  >
-                    <Text style={styles.choiceTitle}>{customerId === customer.id ? '◉' : '○'} {customer.name}</Text>
-                    {!!customer.email && <Text style={styles.choiceMeta}>{customer.email}</Text>}
-                  </Pressable>
-                ))}
+                {limitedList && <Text style={styles.warning}>The product list shows only the first API page. Use Orevon Web if a product is missing.</Text>}
+                <SectionTitle>1. Customer</SectionTitle>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={chosenCustomer ? `Customer ${chosenCustomer.name}. Tap to change` : 'Select customer'}
+                  accessibilityHint="Opens a searchable customer list"
+                  onPress={() => { setCustomerSearch(''); setCustomerPickerOpen(true); }}
+                  style={[styles.customerSelect, chosenCustomer && styles.customerSelectChosen]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.selectLabel}>{chosenCustomer ? 'SELECTED CUSTOMER' : 'CHOOSE A CUSTOMER'}</Text>
+                    <Text style={[styles.selectValue, !chosenCustomer && styles.selectPlaceholder]}>{chosenCustomer?.name || 'Tap to select a customer'}</Text>
+                    {!!chosenCustomer?.email && <Text style={styles.choiceMeta}>{chosenCustomer.email}</Text>}
+                  </View>
+                  <Text style={styles.selectChevron}>⌄</Text>
+                </Pressable>
                 <SectionTitle>2. Choose products and quantities</SectionTitle>
                 <TextInput
                   style={styles.input}
@@ -519,6 +756,7 @@ export default function OrdersScreen() {
               </>
             )}
           </ScrollView>
+          )}
         </KeyboardAvoidingView>
       </Modal>
 
@@ -574,6 +812,20 @@ export default function OrdersScreen() {
                           />
                         )) : <Text style={styles.hint}>No payments recorded yet.</Text>}
                       </>
+                    )}
+                    {canOperate && !detailError && selected.status !== 'cancelled' && payments &&
+                      outstandingPaise !== null && outstandingPaise > 0 && (
+                      <View style={styles.manualPayment}>
+                        <Text style={styles.summaryTitle}>Razorpay online payment</Text>
+                        <Text style={styles.hint}>TEST MODE — opens a payment checkout. The amount is determined by the Django server. Test credentials only.</Text>
+                        <Pressable accessibilityRole="button"
+                          disabled={checkoutBusy || checkoutVerifying || acting || detailBusy || requiresPaymentRefresh}
+                          onPress={() => { void startRazorpayTestCheckout(); }}
+                          style={[styles.primaryButton, (checkoutBusy || checkoutVerifying || acting || detailBusy || requiresPaymentRefresh) && styles.disabled]}>
+                          {checkoutBusy ? <ActivityIndicator color="white"/> : <Text style={styles.primaryText}>Pay {amount(outstandingPaise / 100)} · Razorpay TEST</Text>}
+                        </Pressable>
+                        <Text style={styles.hint}>Payment is recorded only after Django verifies a captured transaction. Closing checkout does not cancel the gateway order.</Text>
+                      </View>
                     )}
                     {canOperate && !detailError && selected.status !== 'cancelled' && payments &&
                       outstandingPaise !== null && outstandingPaise > 0 && (
@@ -649,11 +901,53 @@ export default function OrdersScreen() {
           </ScrollView>
         </View>
       </Modal>
+      <RazorpayTestCheckout
+        session={checkout}
+        verifying={checkoutVerifying}
+        onClose={closeRazorpayTestCheckout}
+        onMessage={(event) => { void onRazorpayCheckoutEvent(event); }}
+      />
     </Page>
   );
 }
 
 const styles = StyleSheet.create({
+  orderCard: { backgroundColor: '#FFFFFF', paddingHorizontal: 14, paddingVertical: 13, borderRadius: 16, borderWidth: 1, borderColor: '#E1E9F0', marginBottom: 9, minHeight: 88 },
+  orderHeading: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  orderTitleWrap: { flex: 1 },
+  orderNumber: { color: '#132740', fontWeight: '900', fontSize: 14 },
+  orderCustomer: { color: '#61758C', fontSize: 12, marginTop: 5 },
+  orderTotal: { color: '#14243A', fontWeight: '900', fontSize: 14 },
+  orderFooter: { marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  orderSpacer: { flex: 1 },
+  orderDate: { color: '#758397', fontSize: 10 },
+  orderArrow: { color: '#0E8F72', fontSize: 19, fontWeight: '800', marginLeft: 4 },
+  listEmpty: { color: '#687A8F', fontSize: 13, marginBottom: 15 },
+  brandEyebrow: { color: '#0E8877', fontSize: 10, letterSpacing: 1.6, fontWeight: '900', marginBottom: 5 },
+  customerSelect: { backgroundColor: 'white', borderWidth: 1.5, borderColor: '#CDD9E5', borderRadius: 15, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18, minHeight: 72 },
+  customerSelectChosen: { borderColor: '#0D967F', backgroundColor: '#F3FDF9' },
+  selectLabel: { fontSize: 10, fontWeight: '800', color: '#65839A', letterSpacing: 0.8, marginBottom: 6 },
+  selectValue: { fontSize: 16, fontWeight: '800', color: '#10233D' },
+  selectPlaceholder: { color: '#66778B', fontWeight: '600' },
+  selectChevron: { fontSize: 26, color: '#087A69', fontWeight: '600', paddingHorizontal: 6 },
+  pickerScreen: { flex: 1, backgroundColor: '#F5F8FC', paddingTop: 52 },
+  pickerHeader: { paddingHorizontal: 20, paddingBottom: 18, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  pickerHeaderContent: { flex: 1 },
+  pickerTitle: { color: '#14233A', fontSize: 25, fontWeight: '900', letterSpacing: -0.4 },
+  pickerSubtitle: { color: '#65768E', fontSize: 13, lineHeight: 19, marginTop: 6 },
+  pickerClose: { backgroundColor: '#E8F2F0', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  pickerSearch: { backgroundColor: 'white', borderWidth: 1, borderColor: '#D9E4ED', borderRadius: 13, color: '#14233A', fontSize: 15, marginHorizontal: 20, paddingHorizontal: 15, paddingVertical: 14, marginBottom: 10 },
+  pickerResults: { flex: 1 },
+  pickerResultsContent: { paddingHorizontal: 20, paddingBottom: 38, paddingTop: 6 },
+  pickerResult: { backgroundColor: 'white', borderWidth: 1, borderColor: '#E5EDF3', padding: 13, borderRadius: 14, flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 9, minHeight: 66 },
+  pickerResultSelected: { borderColor: '#10A884', backgroundColor: '#F0FCF7' },
+  pickerResultContent: { flex: 1 },
+  customerAvatar: { width: 39, height: 39, backgroundColor: '#E6F6EF', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  customerInitial: { color: '#0D7967', fontWeight: '900', fontSize: 16 },
+  selectedMark: { color: '#0D967F', fontWeight: '900', fontSize: 19 },
+  loadMoreButton: { padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#E7F3EF', marginTop: 4 },
+  loadMoreText: { color: '#047857', fontWeight: '800' },
+  emptyMessage: { padding: 18, color: '#64748B', textAlign: 'center', lineHeight: 21 },
   primaryButton: { backgroundColor: '#047857', paddingVertical: 15, borderRadius: 13, alignItems: 'center', marginBottom: 12 },
   primaryText: { color: 'white', fontWeight: '800', fontSize: 15 },
   hint: { color: '#64748B', lineHeight: 19, fontSize: 12, marginBottom: 14, marginTop: 4 },

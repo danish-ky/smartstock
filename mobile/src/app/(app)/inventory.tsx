@@ -13,9 +13,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { InfoCard, LoadNotice, Page, SectionTitle } from '../../components/MobileUI';
+import { LoadNotice, Page, SectionTitle } from '../../components/MobileUI';
+import { ListFilters, ListMore, ListSearch, LoadedHint, StatusChip } from '../../components/OrevonListUI';
+import { useOrevonPages, type PagePayload } from '../../lib/useOrevonPages';
+import { OrevonScreenHero } from '../../components/OrevonScreenHero';
 import { useAuth } from '../../context/AuthContext';
-import { listItems } from '../../lib/api';
 import { useRemote } from '../../lib/useRemote';
 
 type Product = {
@@ -38,7 +40,7 @@ type Movement = {
   note?: string;
   created_at?: string;
 };
-type Payload<T> = T[] | { results?: T[] };
+type Payload<T> = PagePayload<T>;
 type Direction = 'in' | 'out';
 
 type Adjustment = {
@@ -49,7 +51,7 @@ type Adjustment = {
 };
 
 function InventoryContent() {
-  const { apiPost } = useAuth();
+  const { apiGet, apiPost } = useAuth();
   const { data, busy, error, reload } = useRemote<Payload<Product>>('/products/');
   const {
     data: movementsData,
@@ -64,8 +66,29 @@ function InventoryContent() {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [submissionError, setSubmissionError] = useState('');
-  const products = useMemo(() => listItems(data), [data]);
-  const movements = useMemo(() => listItems(movementsData), [movementsData]);
+  const { rows: products, moreAvailable: productNext, loadingMore: loadingProducts, moreError: productPageError, loadMore: loadProductPage } =
+    useOrevonPages(data, '/products/', path => apiGet<Payload<Product>>(path));
+  const { rows: movements, moreAvailable: movementNext, loadingMore: loadingMovements, moreError: movementPageError, loadMore: loadMovementPage } =
+    useOrevonPages(movementsData, '/movements/', path => apiGet<Payload<Movement>>(path));
+  const [stockSearch, setStockSearch] = useState('');
+  const [stockFilter, setStockFilter] = useState('all');
+  const [stockLimit, setStockLimit] = useState(8);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const [historyLimit, setHistoryLimit] = useState(12);
+  const stockRows = useMemo(() => products.filter(product => {
+    const query = stockSearch.trim().toLowerCase();
+    const matches = !query || `${product.name} ${product.sku || ''}`.toLowerCase().includes(query);
+    const out = product.stock <= 0;
+    const low = !out && typeof product.low_stock_threshold === 'number' && product.stock <= product.low_stock_threshold;
+    return matches && (stockFilter === 'all' || (stockFilter === 'out' && out) || (stockFilter === 'low' && low) || (stockFilter === 'healthy' && !out && !low));
+  }), [products, stockSearch, stockFilter]);
+  const historyRows = useMemo(() => movements.filter(movement => {
+    const query = historySearch.trim().toLowerCase();
+    return (!query || `${movement.product_name || ''} ${movement.product_sku || ''} ${movement.order_number || ''} ${movement.performed_by_name || ''}`.toLowerCase().includes(query)) &&
+      (historyFilter === 'all' || movement.movement_type.toLowerCase() === historyFilter);
+  }), [movements, historySearch, historyFilter]);
   const selected = products.find(p => p.id === selectedId);
 
   function beginAdjustment(product: Product, movement: Direction) {
@@ -148,40 +171,56 @@ function InventoryContent() {
     >
       <LoadNotice loading={busy && !data} error={error} onRetry={reload} empty={!!data && !products.length} />
 
+<OrevonScreenHero
+        eyebrow="STOCK CONTROL"
+        title="Inventory overview"
+        description="Adjust stock safely and review every recorded movement."
+        stats={[
+          { label: 'Loaded', value: products.length },
+          { label: 'Low / out', value: products.filter(p => p.stock <= (p.low_stock_threshold ?? 0)).length },
+          { label: 'Audit loaded', value: movements.length },
+        ]}
+      />
+
+
       {!!products.length && !error && (
         <>
           <SectionTitle>Stock by product</SectionTitle>
-          {products.map(product => {
-            const low = typeof product.low_stock_threshold === 'number' &&
-              product.stock <= product.low_stock_threshold;
+          <ListSearch label="Search loaded inventory" placeholder="Search product or SKU" value={stockSearch} onChangeText={text => { setStockSearch(text); setStockLimit(8); }} />
+          <ListFilters value={stockFilter} onChange={value => { setStockFilter(value); setStockLimit(8); }} items={[
+            { value: 'all', label: 'All' }, { value: 'low', label: 'Low stock' }, { value: 'out', label: 'Out of stock' }, { value: 'healthy', label: 'In stock' },
+          ]} />
+          <LoadedHint text={`Showing ${Math.min(stockLimit, stockRows.length)} of ${stockRows.length} matching loaded products${productNext ? ' · More API pages available' : ''}. Search filters loaded records only.`} />
+          {stockRows.length === 0 && <Text style={styles.subtext}>No matching products in the loaded list.</Text>}
+          {stockRows.slice(0, stockLimit).map(product => {
+            const out = product.stock <= 0;
+            const low = !out && typeof product.low_stock_threshold === 'number' && product.stock <= product.low_stock_threshold;
             return (
               <View key={product.id} style={styles.productCard}>
-                <InfoCard
-                  title={product.name}
-                  detail={`${product.sku || 'No SKU'}${low ? ' · LOW STOCK' : ''}`}
-                  trailing={`${product.stock} units`}
-                />
-                <View style={styles.actions}>
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={saving}
-                    onPress={() => beginAdjustment(product, 'in')}
-                    style={[styles.smallButton, styles.inButton]}
-                  >
+                <View style={styles.stockHeading}>
+                  <View style={styles.stockNameWrap}>
+                    <Text style={styles.stockName} numberOfLines={2}>{product.name}</Text>
+                    <Text style={styles.stockSku} numberOfLines={1}>{product.sku || 'No SKU'}</Text>
+                  </View>
+                  <View style={styles.stockValueWrap}>
+                    <Text style={[styles.stockValue, out && styles.stockOutValue, low && styles.stockLowValue]}>{product.stock} units</Text>
+                    <StatusChip label={out ? 'Out of stock' : low ? 'Low stock' : 'In stock'} tone={out ? 'danger' : low ? 'warning' : 'success'} />
+                  </View>
+                </View>
+                <View style={[styles.actions, styles.productActions]}>
+                  <Pressable accessibilityRole="button" disabled={saving} onPress={() => beginAdjustment(product, 'in')} style={[styles.smallButton, styles.inButton]}>
                     <Text style={styles.inText}>+ Stock In</Text>
                   </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    disabled={saving || product.stock === 0}
-                    onPress={() => beginAdjustment(product, 'out')}
-                    style={[styles.smallButton, styles.outButton, product.stock === 0 && styles.disabled]}
-                  >
+                  <Pressable accessibilityRole="button" disabled={saving || product.stock === 0} onPress={() => beginAdjustment(product, 'out')} style={[styles.smallButton, styles.outButton, product.stock === 0 && styles.disabled]}>
                     <Text style={styles.outText}>− Stock Out</Text>
                   </Pressable>
                 </View>
               </View>
             );
           })}
+          {stockRows.length > stockLimit && <ListMore label="Show 8 more products" onPress={() => setStockLimit(value => value + 8)} />}
+          {!!productPageError && <Text style={styles.error}>{productPageError}</Text>}
+          {productNext && <ListMore label="Load next product page" busy={loadingProducts} onPress={() => { void loadProductPage(); }} />}
         </>
       )}
 
@@ -235,31 +274,72 @@ function InventoryContent() {
         </KeyboardAvoidingView>
       </Modal>}
 
-      <SectionTitle>Stock audit trail</SectionTitle>
-      <Text style={styles.auditCaption}>Read-only history. Older entries may not have balance snapshots.</Text>
+      <View style={styles.auditHeading}>
+        <View style={styles.auditTitleWrap}>
+          <SectionTitle>Recent stock activity</SectionTitle>
+          <Text style={styles.auditCaption}>Five recent entries · Full audit history remains accessible.</Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={() => setHistoryOpen(true)} style={styles.viewHistory}>
+          <Text style={styles.viewHistoryText}>View all</Text>
+        </Pressable>
+      </View>
       <LoadNotice loading={movementsBusy && !movementsData} error={movementsError} onRetry={reloadMovements} />
-      {!movementsError && movements.slice(0, 10).map(movement => (
-        <InfoCard
-          key={movement.id}
-          title={`${movement.product_name || 'Product'} · ${movement.movement_type.toUpperCase()}`}
-          detail={[
-            `SKU: ${movement.product_sku || 'Not recorded'}`,
-            movement.stock_before == null || movement.stock_after == null
-              ? 'Before → After: unavailable (legacy entry)'
-              : `${movement.stock_before} → ${movement.stock_after} units`,
-            movement.note || 'Stock movement recorded',
-            movement.order_number ? `Order: ${movement.order_number}` : '',
-            movement.performed_by_name ? `By: ${movement.performed_by_name}` : '',
-            movement.created_at ? `At: ${new Date(movement.created_at).toLocaleString()}` : '',
-          ].filter(Boolean).join(' · ')}
-          trailing={`${movement.movement_type === 'in' || movement.movement_type === 'return' ? '+' : '−'}${movement.quantity} units`}
-        />
-      ))}
-      {movementsData && !movements.length && !movementsError && (
-        <Text style={styles.subtext}>No stock movements recorded yet.</Text>
-      )}
+      {!movementsError && movements.slice(0, 5).map(movement => <StockActivity key={movement.id} movement={movement} />)}
+      {movementsData && !movements.length && !movementsError && <Text style={styles.subtext}>No stock movements recorded yet.</Text>}
+
+      <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}>
+        <View style={styles.historyScreen}>
+          <View style={styles.historyHeader}>
+            <View style={styles.historyTitleWrap}>
+              <Text style={styles.historyEyebrow}>OREVON / INVENTORY</Text>
+              <Text style={styles.historyTitle}>Stock audit history</Text>
+              <Text style={styles.historyHelp}>Read-only records. Stock balances may be missing in older entries.</Text>
+            </View>
+            <Pressable accessibilityRole="button" onPress={() => setHistoryOpen(false)} style={styles.historyClose}><Text style={styles.historyCloseText}>Close</Text></Pressable>
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.historyContent}>
+            <ListSearch label="Search loaded stock movements" placeholder="Product, SKU, order or staff" value={historySearch} onChangeText={value => { setHistorySearch(value); setHistoryLimit(12); }} />
+            <ListFilters value={historyFilter} onChange={value => { setHistoryFilter(value); setHistoryLimit(12); }} items={[
+              { value: 'all', label: 'All activity' }, { value: 'in', label: 'Stock In' }, { value: 'out', label: 'Stock Out' }, { value: 'sale', label: 'Sales' }, { value: 'return', label: 'Returns' },
+            ]} />
+            <LoadedHint text={`${Math.min(historyLimit, historyRows.length)} of ${historyRows.length} matching loaded entries. Load more pages to explore older records.`} />
+            {historyRows.length === 0 && <Text style={styles.subtext}>No matching movements in loaded history.</Text>}
+            {historyRows.slice(0, historyLimit).map(movement => <StockActivity key={movement.id} movement={movement} />)}
+            {historyRows.length > historyLimit && <ListMore label="Show 12 more entries" onPress={() => setHistoryLimit(value => value + 12)} />}
+            {!!movementPageError && <Text style={styles.error}>{movementPageError}</Text>}
+            {movementNext && <ListMore label="Load older audit entries" busy={loadingMovements} onPress={() => { void loadMovementPage(); }} />}
+          </ScrollView>
+        </View>
+      </Modal>
     </Page>
   );
+}
+
+function StockActivity({ movement }: { movement: Movement }) {
+  const kind = movement.movement_type.toLowerCase();
+  const incoming = ['in', 'return'].includes(kind);
+  const heading = kind === 'sale' ? 'Stock sold' : kind === 'return' ? 'Stock returned' : incoming ? 'Stock received' : kind === 'out' ? 'Stock removed' : kind.replace(/_/g, ' ');
+  const date = movement.created_at ? new Date(movement.created_at) : null;
+  const dateText = date && !Number.isNaN(date.valueOf()) ? date.toLocaleString('en-IN') : 'Date unavailable';
+  return <View style={styles.activityCard}>
+    <View style={styles.activityTop}>
+      <View style={[styles.activityIcon, incoming ? styles.activityIn : styles.activityOut]}>
+        <Text style={[styles.activitySymbol, incoming ? styles.activityInText : styles.activityOutText]}>{incoming ? '↓' : '↑'}</Text>
+      </View>
+      <View style={styles.activityBody}>
+        <Text style={styles.activityKind}>{heading}</Text>
+        <Text numberOfLines={2} style={styles.activityProduct}>{movement.product_name || 'Product'}</Text>
+      </View>
+      <Text style={[styles.activityQuantity, incoming ? styles.activityInText : styles.activityOutText]}>{incoming ? '+' : '−'}{movement.quantity}</Text>
+    </View>
+    <View style={styles.activityDetails}>
+      <Text style={styles.activityMeta}>{movement.product_sku || 'SKU not recorded'} · {dateText}</Text>
+      {movement.stock_before != null && movement.stock_after != null && <Text style={styles.activityMeta}>Balance: {movement.stock_before} → {movement.stock_after} units</Text>}
+      {!!movement.order_number && <Text style={styles.activityMeta}>Order {movement.order_number}</Text>}
+      {!!movement.performed_by_name && <Text style={styles.activityMeta}>By {movement.performed_by_name}</Text>}
+      {!!movement.note && <Text style={styles.activityNote}>{movement.note}</Text>}
+    </View>
+  </View>;
 }
 
 export default function InventoryScreen() {
@@ -271,27 +351,64 @@ export default function InventoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  productCard: { marginBottom: 8 },
-  auditCaption: { color: '#64748B', fontSize: 12, marginBottom: 10, lineHeight: 18 },
+  productCard: { marginBottom: 9, padding: 13, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6EBF1', borderRadius: 17, shadowColor: '#12243A', shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
+  auditCaption: { color: '#64758B', fontSize: 11, marginTop: 1, lineHeight: 17 },
+  stockHeading: { flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 12 },
+  stockNameWrap: { flex: 1 },
+  stockName: { color: '#14243A', fontSize: 14, fontWeight: '800', lineHeight: 19 },
+  stockSku: { color: '#718198', fontSize: 11, marginTop: 4 },
+  stockValueWrap: { alignItems: 'flex-end', gap: 5 },
+  stockValue: { color: '#047857', fontSize: 14, fontWeight: '900' },
+  stockOutValue: { color: '#B42336' },
+  stockLowValue: { color: '#9B6405' },
+  productActions: { marginBottom: 0 },
+  auditHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12, marginBottom: 12 },
+  auditTitleWrap: { flex: 1 },
+  viewHistory: { backgroundColor: '#E4F4ED', paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10 },
+  viewHistoryText: { color: '#047857', fontSize: 12, fontWeight: '800' },
+  activityCard: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E3EAF0', padding: 13, borderRadius: 16, marginBottom: 9 },
+  activityTop: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  activityIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  activityIn: { backgroundColor: '#E3F7EE' },
+  activityOut: { backgroundColor: '#FCECEB' },
+  activitySymbol: { fontSize: 20, fontWeight: '900' },
+  activityInText: { color: '#07805F' },
+  activityOutText: { color: '#B42336' },
+  activityBody: { flex: 1 },
+  activityKind: { color: '#22344A', fontSize: 11, fontWeight: '800' },
+  activityProduct: { color: '#11243D', fontSize: 13, fontWeight: '800', marginTop: 3 },
+  activityQuantity: { fontSize: 15, fontWeight: '900' },
+  activityDetails: { paddingLeft: 47, gap: 2, marginTop: 8 },
+  activityMeta: { color: '#67778B', fontSize: 11, lineHeight: 17 },
+  activityNote: { color: '#334155', fontSize: 11, marginTop: 4, lineHeight: 16 },
+  historyScreen: { flex: 1, backgroundColor: '#F5F8FC' },
+  historyHeader: { backgroundColor: '#10263C', paddingTop: 52, paddingBottom: 21, paddingHorizontal: 19, flexDirection: 'row', gap: 8, alignItems: 'center' },
+  historyTitleWrap: { flex: 1 },
+  historyEyebrow: { color: '#6CE4B8', letterSpacing: 1.3, fontSize: 10, fontWeight: '800', marginBottom: 5 },
+  historyTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '900' },
+  historyHelp: { color: '#C4D5E4', fontSize: 11, marginTop: 6, lineHeight: 16 },
+  historyClose: { backgroundColor: '#D7F5E8', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  historyCloseText: { color: '#075A46', fontSize: 12, fontWeight: '800' },
+  historyContent: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 44 },
   actions: { flexDirection: 'row', gap: 10, marginBottom: 12 },
-  smallButton: { flex: 1, alignItems: 'center', borderRadius: 11, paddingVertical: 11 },
-  inButton: { backgroundColor: '#D1FAE5' },
-  outButton: { backgroundColor: '#E2E8F0' },
-  inText: { color: '#047857', fontWeight: '700' },
-  outText: { color: '#334155', fontWeight: '700' },
+  smallButton: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 11, paddingVertical: 13 },
+  inButton: { backgroundColor: '#E3F7EF', borderWidth: 1, borderColor: '#B6EBD7' },
+  outButton: { backgroundColor: '#F2F5F9', borderWidth: 1, borderColor: '#DDE5EE' },
+  inText: { color: '#047857', fontWeight: '800' },
+  outText: { color: '#334155', fontWeight: '800' },
   disabled: { opacity: 0.4 },
-  modalBackdrop: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(15,23,42,0.65)' },
+  modalBackdrop: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(9,22,38,0.70)' },
   modalScroll: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-  form: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18 },
-  formTitle: { fontSize: 19, fontWeight: '800', color: '#0F172A' },
+  form: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 20, borderWidth: 1, borderColor: '#E6EBF1' },
+  formTitle: { fontSize: 21, fontWeight: '800', color: '#12243A' },
   subtext: { fontSize: 13, color: '#64748B', marginTop: 7, marginBottom: 12 },
   fieldLabel: { color: '#334155', fontWeight: '700', marginTop: 10, marginBottom: 7 },
-  input: { backgroundColor: '#F8FAFC', borderColor: '#CBD5E1', borderWidth: 1, borderRadius: 10, padding: 12, color: '#0F172A' },
+  input: { backgroundColor: '#F8FAFC', borderColor: '#DFE6ED', borderWidth: 1, borderRadius: 12, padding: 14, color: '#18283C' },
   noteInput: { minHeight: 76, textAlignVertical: 'top' },
   error: { color: '#B91C1C', marginVertical: 12 },
   formButton: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 11 },
   cancelButton: { backgroundColor: '#E2E8F0' },
-  confirmButton: { backgroundColor: '#059669' },
+  confirmButton: { backgroundColor: '#059A75' },
   cancelText: { color: '#334155', fontWeight: '700' },
   confirmText: { color: '#FFFFFF', fontWeight: '700' },
 });

@@ -2,6 +2,9 @@ import { Redirect } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LoadNotice, Page, SectionTitle } from '../components/MobileUI';
+import { OrevonScreenHero } from '../components/OrevonScreenHero';
+import { ListFilters, ListMore, ListSearch, LoadedHint, StatusChip } from '../components/OrevonListUI';
+import { useOrevonPages } from '../lib/useOrevonPages';
 import { useAuth } from '../context/AuthContext';
 import { listItems } from '../lib/api';
 import { useRemote } from '../lib/useRemote';
@@ -17,12 +20,20 @@ const price = (v: string | number) => `₹${Number(v || 0).toFixed(2)}`;
 const msg = (e: unknown) => e instanceof Error ? e.message : 'Something went wrong.';
 
 function Content() {
-  const {user, apiPost, apiOpenPdf} = useAuth();
+  const {user, apiGet, apiPost, apiOpenPdf} = useAuth();
   const manager = user?.role === 'admin' || user?.role === 'manager';
   const {data: poData, busy, error, reload} = useRemote<List<PO>>('/purchase-orders/');
   const {data: vendorData, reload: reloadVendors} = useRemote<List<Supplier>>('/suppliers/');
   const {data: productData, reload: reloadProducts} = useRemote<List<Product>>('/products/');
-  const orders = useMemo(() => listItems(poData), [poData]);
+  const { rows: orders, moreAvailable: poNext, loadingMore: poMoreBusy, moreError: poMoreError, loadMore: loadPOPage } =
+    useOrevonPages(poData, '/purchase-orders/', query => apiGet<List<PO>>(query));
+  const [poSearch, setPoSearch] = useState('');
+  const [poFilter, setPoFilter] = useState('all');
+  const [poLimit, setPoLimit] = useState(10);
+  const filteredPOs = useMemo(() => orders.filter(po => {
+    const query = poSearch.trim().toLowerCase();
+    return (!query || `${po.number} ${po.supplier_name}`.toLowerCase().includes(query)) && (poFilter === 'all' || po.status === poFilter);
+  }), [orders, poSearch, poFilter]);
   const suppliers = useMemo(() => listItems(vendorData), [vendorData]);
   const products = useMemo(() => listItems(productData), [productData]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -122,15 +133,42 @@ function Content() {
   }
 
   return <Page title="Purchase orders" subtitle="Supplier orders and audited stock receipts" refreshing={busy} onRefresh={refresh}>
+    <OrevonScreenHero
+      eyebrow="PROCUREMENT"
+      title="Purchase orders"
+      description="Track supplier deliveries from draft to final receipt."
+      stats={[
+        { label: 'POs loaded', value: orders.length },
+        { label: 'Awaiting', value: orders.filter(po => ['ordered', 'partial'].includes(po.status)).length },
+        { label: 'Received', value: orders.filter(po => po.status === 'received').length },
+      ]}
+    />
     <LoadNotice loading={busy && !poData} error={error} onRetry={reload} empty={false}/>
     {manager && <Pressable style={styles.primary} onPress={startCreate}><Text style={styles.primaryText}>＋ New purchase order</Text></Pressable>}
-    <SectionTitle>Supplier orders ({orders.length})</SectionTitle>
+    <SectionTitle>Supplier orders</SectionTitle>
+    {!!orders.length && <>
+      <ListSearch label="Search loaded purchase orders" placeholder="PO number or supplier" value={poSearch} onChangeText={value => { setPoSearch(value); setPoLimit(10); }} />
+      <ListFilters value={poFilter} onChange={value => { setPoFilter(value); setPoLimit(10); }} items={[
+        { value: 'all', label: 'All' }, { value: 'draft', label: 'Draft' }, { value: 'ordered', label: 'Ordered' }, { value: 'partial', label: 'Partial' }, { value: 'received', label: 'Received' }, { value: 'cancelled', label: 'Cancelled' },
+      ]} />
+      <LoadedHint text={`${Math.min(poLimit, filteredPOs.length)} of ${filteredPOs.length} matching loaded POs${poNext ? ' · More API pages available' : ''}. Search filters loaded records only.`} />
+    </>}
     {!orders.length && !busy && <Text style={styles.secondary}>No purchase orders yet.</Text>}
-    {orders.map(po => <Pressable key={po.id} style={styles.card} onPress={() => setSelectedId(selectedId === po.id ? null : po.id)}>
-      <View style={styles.between}><Text style={styles.title}>{po.number}</Text><Text style={styles.status}>{po.status}</Text></View>
-      <Text style={styles.secondary}>{po.supplier_name} · {price(po.total)} · {po.items.length} products</Text>
-      <Text style={styles.small}>{selectedId === po.id ? 'Tap to collapse' : 'Tap to view, place or receive'}</Text>
+    {!!orders.length && !filteredPOs.length && <Text style={styles.secondary}>No matching purchase orders in loaded records.</Text>}
+    {filteredPOs.slice(0, poLimit).map(po => <Pressable key={po.id} style={[styles.card, styles.poCard, selectedId === po.id && styles.selectedPO]} onPress={() => setSelectedId(selectedId === po.id ? null : po.id)}>
+      <View style={styles.between}>
+        <Text style={styles.title}>{po.number}</Text>
+        <StatusChip label={po.status.replace(/_/g, ' ')} tone={po.status === 'received' ? 'success' : po.status === 'cancelled' ? 'danger' : po.status === 'partial' ? 'warning' : po.status === 'ordered' ? 'info' : 'neutral'} />
+      </View>
+      <Text style={[styles.secondary, styles.poSupplier]} numberOfLines={1}>{po.supplier_name}</Text>
+      <View style={[styles.between, styles.poFoot]}>
+        <Text style={styles.poTotal}>{price(po.total)}</Text>
+        <Text style={styles.small}>{po.items.length} items · {selectedId === po.id ? 'Hide details' : 'View details ›'}</Text>
+      </View>
     </Pressable>)}
+    {filteredPOs.length > poLimit && <ListMore label="Show 10 more purchase orders" onPress={() => setPoLimit(value => value + 10)} />}
+    {!!poMoreError && <Text style={styles.error}>{poMoreError}</Text>}
+    {poNext && <ListMore label="Load next purchase-order page" busy={poMoreBusy} onPress={() => { void loadPOPage(); }} />}
     {selected && <>
       <SectionTitle>{selected.number} details</SectionTitle>
       <View style={styles.card}>
@@ -207,22 +245,27 @@ export default function PurchaseOrdersScreen() {
 
 const styles = StyleSheet.create({
   center:{flex:1,justifyContent:'center',alignItems:'center'},
-  card:{backgroundColor:'#fff',borderRadius:14,padding:16,marginBottom:10,gap:6},
+  poCard: { marginBottom: 9, padding: 15 },
+  selectedPO: { borderColor: '#0D9776', backgroundColor: '#F4FCF8' },
+  poSupplier: { marginTop: 7 },
+  poFoot: { marginTop: 11, alignItems: 'center' },
+  poTotal: { fontSize: 15, color: '#123149', fontWeight: '900' },
+  card:{ backgroundColor: '#FFFFFF', borderRadius: 18, padding: 17, marginBottom: 11, gap: 7, borderWidth: 1, borderColor: '#E6EBF1', shadowColor: '#12243A', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
   between:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},
-  title:{fontSize:15,fontWeight:'800',color:'#0F172A'},
-  heading:{fontSize:24,fontWeight:'800',color:'#0F172A',marginBottom:8},
-  secondary:{color:'#64748B',fontSize:13,lineHeight:20},
-  small:{color:'#64748B',fontSize:12},
-  status:{color:'#047857',fontWeight:'800',textTransform:'capitalize'},
-  label:{fontWeight:'700',fontSize:13,color:'#334155',marginTop:12,marginBottom:5},
-  line:{borderTopColor:'#E2E8F0',borderTopWidth:1,paddingVertical:12,gap:4},
-  input:{backgroundColor:'#F8FAFC',borderWidth:1,borderColor:'#CBD5E1',padding:12,borderRadius:9,color:'#0F172A'},
-  option:{padding:12,marginTop:6,backgroundColor:'#F8FAFC',borderRadius:9,borderWidth:1,borderColor:'#E2E8F0'},
-  active:{backgroundColor:'#D1FAE5',borderColor:'#059669'},
-  primary:{backgroundColor:'#047857',padding:15,borderRadius:10,alignItems:'center',marginTop:12},
+  title:{ fontSize: 15, fontWeight: '800', color: '#12243A' },
+  heading:{ fontSize: 24, fontWeight: '800', color: '#12243A', marginBottom: 8 },
+  secondary:{ color: '#64758B', fontSize: 13, lineHeight: 20 },
+  small:{ color: '#8291A2', fontSize: 12 },
+  status:{ color: '#047857', fontWeight: '800', textTransform: 'capitalize', fontSize: 11, backgroundColor: '#E3F7EF', overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 },
+  label:{ fontWeight: '700', fontSize: 13, color: '#18283C', marginTop: 12, marginBottom: 6 },
+  line:{ borderTopColor: '#E6EBF1', borderTopWidth: 1, paddingVertical: 13, gap: 5 },
+  input:{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#DFE6ED', padding: 14, borderRadius: 12, color: '#18283C' },
+  option:{ padding: 13, marginTop: 7, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E6EBF1' },
+  active:{ backgroundColor: '#E3F7EF', borderColor: '#059A75' },
+  primary:{ backgroundColor: '#059A75', padding: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   primaryText:{color:'#fff',fontWeight:'800'},
   danger:{backgroundColor:'#B91C1C',padding:15,borderRadius:10,alignItems:'center',marginTop:10},
-  secondaryButton:{backgroundColor:'#E2E8F0',padding:15,borderRadius:10,alignItems:'center',marginTop:12},
-  modal:{padding:22,paddingTop:48,paddingBottom:60,backgroundColor:'#F1F5F9'},
+  secondaryButton:{ backgroundColor: '#E6EBF1', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 12 },
+  modal:{ padding: 22, paddingTop: 48, paddingBottom: 60, backgroundColor: '#F5F8FC' },
   error:{color:'#B91C1C',marginVertical:10,fontWeight:'600'},
 });
