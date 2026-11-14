@@ -208,7 +208,7 @@ export default function DirectoryManager({ kind }: { kind: Kind }) {
   }
 
   if (!canRead) {
-    return <Page title="Access restricted" subtitle="This directory is for SmartStock operators."><Text>Access denied.</Text></Page>;
+    return <Page title="Access restricted" subtitle="This directory is for Orevon operators."><Text>Access denied.</Text></Page>;
   }
 
   return (

@@ -49,7 +49,7 @@ export default function LoginScreen() {
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.card}>
             <View style={styles.mark}><Text style={styles.markText}>S</Text></View>
-            <Text style={styles.brand}>SmartStock</Text>
+            <Text style={styles.brand}>Orevon</Text>
             <Text style={styles.subtitle}>Inventory & Order Management</Text>
             <Text style={styles.heading}>Welcome back</Text>
             <Text style={styles.label}>Username</Text>
@@ -60,7 +60,7 @@ export default function LoginScreen() {
             <Pressable style={[styles.button, busy && { opacity: 0.65 }]} disabled={busy} onPress={submit}>
               {busy ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>Sign In</Text>}
             </Pressable>
-            <Text style={styles.hint}>Sign in using your existing SmartStock account.</Text>
+            <Text style={styles.hint}>Sign in using your existing Orevon account.</Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

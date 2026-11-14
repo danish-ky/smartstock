@@ -1,4 +1,4 @@
-"""SmartStock project settings. SQLite dev fallback, PostgreSQL via DATABASE_URL."""
+"""Orevon project settings. SQLite dev fallback, PostgreSQL via DATABASE_URL."""
 from pathlib import Path
 from datetime import timedelta
 import os
@@ -68,7 +68,7 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
-SPECTACULAR_SETTINGS = {'TITLE': 'SmartStock API', 'DESCRIPTION': 'Inventory & Order Management REST API', 'VERSION': '1.0.0'}
+SPECTACULAR_SETTINGS = {'TITLE': 'Orevon API', 'DESCRIPTION': 'Inventory & Order Management REST API', 'VERSION': '1.0.0'}
 CORS_ALLOWED_ORIGINS = [s.strip() for s in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:5173').split(',') if s.strip()]
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Asia/Kolkata'

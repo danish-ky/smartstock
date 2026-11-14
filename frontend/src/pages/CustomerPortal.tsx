@@ -173,7 +173,7 @@ export function CustomerCatalogPage(){
     {shown.length?<div className="customer-catalog">{shown.map(p=><article key={p.id} className="panel customer-product-card">
       <CustomerProductImage product={p}/>
       <small>{p.category_name} · {p.sku}</small><h3>{p.name}</h3>
-      <p>{p.description||'Product available from SmartStock.'}</p>
+      <p>{p.description||'Product available from Orevon.'}</p>
       <div><strong>{money(p.price)}</strong><Status value={p.stock_status==='out'?'out':'available'}/></div>
     </article>)}</div>:<section className="panel"><EmptyState title="No matching products" description="Try a different search."/></section>}
     <p className="customer-note"><Search size={16}/> Customers can browse products but cannot edit prices, inventory, orders or payments.</p>

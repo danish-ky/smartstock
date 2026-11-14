@@ -297,7 +297,7 @@ export default function ProductsScreen() {
       if (exact) {
         setFoundProduct(exact);
       } else {
-        setSearchMessage('No active SmartStock product has this exact SKU. A retail barcode must be saved as the product SKU to match.');
+        setSearchMessage('No active Orevon product has this exact SKU. A retail barcode must be saved as the product SKU to match.');
       }
     } catch (err) {
       setSearchMessage(err instanceof Error ? err.message : 'Unable to search products.');
@@ -347,7 +347,7 @@ export default function ProductsScreen() {
       {!!choicesError && canManage && <Text style={styles.warning}>{choicesError}</Text>}
       <View style={styles.lookupCard}>
         <Text style={styles.lookupTitle}>Find a product</Text>
-        <Text style={styles.helper}>Scan a QR or product barcode whose value matches the SmartStock SKU, or type the SKU manually.</Text>
+        <Text style={styles.helper}>Scan a QR or product barcode whose value matches the Orevon SKU, or type the SKU manually.</Text>
         <TextInput
           accessibilityLabel="Product SKU"
           value={inputSku}

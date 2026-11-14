@@ -189,7 +189,7 @@ export default function Layout() {
         <div className="sidebar-logo">
           <div className="logo-mark"><Boxes size={23} strokeWidth={2.4} /></div>
           <div className="brand-copy">
-            <strong>smartstock<span>.</span></strong>
+            <strong>orevon<span>.</span></strong>
             <small>INVENTORY INTELLIGENCE</small>
           </div>
           <button className="sidebar-close" aria-label="Close menu" onClick={() => setMobileOpen(false)}>
@@ -250,7 +250,7 @@ export default function Layout() {
             </button>
             <span className="breadcrumb">Workspace</span>
             <span className="breadcrumb-slash">/</span>
-            <strong>{titles[location.pathname] || 'SmartStock'}</strong>
+            <strong>{titles[location.pathname] || 'Orevon'}</strong>
           </div>
           <div className="topbar-right">
             <span className="header-date">
@@ -335,7 +335,7 @@ export default function Layout() {
 
               {openMenu === 'profile' && (
                 <section className="topbar-popover profile-menu" id="smartstock-profile-menu" aria-label="My account">
-                  <div className="popover-heading"><div><h2>My account</h2><p>Signed in to SmartStock</p></div></div>
+                  <div className="popover-heading"><div><h2>My account</h2><p>Signed in to Orevon</p></div></div>
                   <div className="profile-details">
                     <div className="profile-detail-avatar">{initials(user?.name || user?.username)}</div>
                     <strong>{displayName}</strong>
@@ -352,7 +352,7 @@ export default function Layout() {
         </header>
         <main id="smartstock-main" className="main-content"><Outlet /></main>
         <footer className="app-footer">
-          <span>© {new Date().getFullYear()} SmartStock. Crafted for better operations.</span>
+          <span>© {new Date().getFullYear()} Orevon. All rights reserved.</span>
           <span className="api-health-status" role="status" aria-live="polite">
             <span className={`footer-dot health-${apiHealth}`} />
             {apiHealth === 'connected' ? 'API reachable' : apiHealth === 'offline' ? 'API unavailable' : 'Checking API'}

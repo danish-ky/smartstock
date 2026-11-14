@@ -344,7 +344,7 @@ export default function OrdersScreen() {
     Alert.alert(
       'Record payment already received?',
       `${selected.number || `Order #${selected.id}`}\nAmount: ${amount(enteredAmount)}\nMethod: ${selectedMethod}\n\n` +
-      'This records an offline payment in SmartStock. It does NOT charge the customer. Confirm that money was actually received.',
+      'This records an offline payment in Orevon. It does NOT charge the customer. Confirm that money was actually received.',
       [
         { text: 'Go back', style: 'cancel' },
         { text: 'Record payment', onPress: () => { void submitManualPayment(selected.id, enteredAmount, paymentMethod, enteredReference); } },
@@ -439,7 +439,7 @@ export default function OrdersScreen() {
             {!!lookupError && <Text style={styles.error}>{lookupError}</Text>}
             {!lookupBusy && !lookupError && (
               <>
-                {limitedList && <Text style={styles.warning}>This form shows only the first API page of customers/products. Use SmartStock Web if an item is missing.</Text>}
+                {limitedList && <Text style={styles.warning}>This form shows only the first API page of customers/products. Use Orevon Web if an item is missing.</Text>}
                 <SectionTitle>1. Select customer</SectionTitle>
                 <TextInput
                   style={styles.input}
@@ -449,7 +449,7 @@ export default function OrdersScreen() {
                   onChangeText={setCustomerSearch}
                   autoCorrect={false}
                 />
-                {!filteredCustomers.length && <Text style={styles.hint}>No customers found. Create a customer in SmartStock Web first.</Text>}
+                {!filteredCustomers.length && <Text style={styles.hint}>No customers found. Create a customer in Orevon Web first.</Text>}
                 {filteredCustomers.map(customer => (
                   <Pressable
                     key={customer.id}

@@ -51,7 +51,7 @@ export default function ProductsPage(){
   finally{setBulkBusy(false);}
  }
  async function exportBulk(format:'csv'|'xlsx',template=false){
-  try{await downloadProductFile(`/products/bulk/${template?'template':'export'}/?file_format=${format}`,`smartstock-${template?'import-template':'product-inventory'}.${format}`);}
+  try{await downloadProductFile(`/products/bulk/${template?'template':'export'}/?file_format=${format}`,`orevon-${template?'import-template':'product-inventory'}.${format}`);}
   catch(e){toast.error((e as Error).message);}
  }
  async function remove(){if(!deleting)return;setSaving(true);try{await api.del(`/products/${deleting.id}/`);toast.success('Product archived');setDeleting(null);await load();}catch(e){toast.error((e as Error).message);}finally{setSaving(false);}}

@@ -17,7 +17,7 @@ import { CustomerHomePage, MyOrdersPage, CustomerCatalogPage } from './pages/Cus
 
 export default function App(){
  const {user,loading}=useAuth();
- if(loading)return <div className="app-boot"><LoaderCircle className="spin" size={35}/><p>Connecting to SmartStock...</p></div>;
+ if(loading)return <div className="app-boot"><LoaderCircle className="spin" size={35}/><p>Connecting to Orevon...</p></div>;
  return <Routes><Route path="/login" element={user?<Navigate to="/" replace/>:<Login/>}/>{user&&<Route element={<Layout/>}>
    <Route path="/" element={canOperate(user.role)?<DashboardPage/>:<Navigate to="/customer" replace/>}/>
    <Route path="/products" element={canOperate(user.role)?<ProductsPage/>:<Navigate to="/catalog" replace/>}/>

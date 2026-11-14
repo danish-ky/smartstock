@@ -79,7 +79,7 @@ function CustomerDashboard() {
   const { data, busy, error, reload } = useRemote<OrdersPayload>('/my/orders/');
   const orders = listItems(data);
   return (
-    <Page title="My Account" subtitle="Your SmartStock customer portal" refreshing={busy} onRefresh={reload}>
+    <Page title="My Account" subtitle="Your Orevon customer portal" refreshing={busy} onRefresh={reload}>
       <LoadNotice loading={busy && !data} error={error} onRetry={reload} />
       {data && !error && <>
         <View style={{ flexDirection: 'row', gap: 12 }}>

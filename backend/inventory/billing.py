@@ -1,4 +1,4 @@
-"""SmartStock billing addon: audited manual payments, test Razorpay, PDF sales invoice."""
+"""Orevon billing addon: audited manual payments, test Razorpay, PDF sales invoice."""
 import hashlib
 import hmac
 import io
@@ -145,7 +145,7 @@ class RazorpayStartView(APIView):
         return Response({'key_id':os.environ['RAZORPAY_KEY_ID'],
                          'razorpay_order_id':attempt.gateway_order_id,
                          'amount':amount_paise, 'currency':'INR',
-                         'name':'SmartStock — TEST PAYMENT', 'description':order.number})
+                         'name':'Orevon — TEST PAYMENT', 'description':order.number})
 
 
 def _confirm_captured(razorpay_order_id, payment_id):
@@ -242,7 +242,7 @@ class OrderInvoiceView(APIView):
             pdf.rect(0,h-102,w,102,fill=1,stroke=0)
             pdf.setFillColor(colors.white)
             pdf.setFont('Helvetica-Bold',21)
-            pdf.drawString(42,h-49,os.environ.get('SMARTSTOCK_BUSINESS_NAME','SmartStock'))
+            pdf.drawString(42,h-49,os.environ.get('SMARTSTOCK_BUSINESS_NAME','Orevon'))
             pdf.setFont('Helvetica',10)
             pdf.drawString(42,h-69,'SALES INVOICE  |  Demo document; not a GST tax invoice')
             pdf.setFillColor(colors.black)

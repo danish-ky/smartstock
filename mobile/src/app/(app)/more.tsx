@@ -24,10 +24,10 @@ export default function AccountScreen() {
   }
 
   return (
-    <Page title="Account" subtitle="SmartStock mobile profile">
+    <Page title="Account" subtitle="Orevon mobile profile">
       <SectionTitle>Signed in as</SectionTitle>
       <View style={styles.card}>
-        <Text style={styles.name}>{user?.full_name || user?.name || user?.username || 'SmartStock User'}</Text>
+        <Text style={styles.name}>{user?.full_name || user?.name || user?.username || 'Orevon User'}</Text>
         <Text style={styles.meta}>{user?.email || user?.username || ''}</Text>
         <Text style={styles.role}>{user?.role || 'User'}</Text>
       </View>

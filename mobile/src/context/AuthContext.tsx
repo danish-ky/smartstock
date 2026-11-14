@@ -257,7 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.pdf$/i, '').slice(0, 100) || 'invoice';
     const file = new File(Paths.cache, `${safeName}-${Date.now()}.pdf`);
     await file.write(bytes);
-    const documentTitle = path.startsWith('/purchase-orders/') ? 'SmartStock Goods Received Note' : 'SmartStock Invoice';
+    const documentTitle = path.startsWith('/purchase-orders/') ? 'Orevon Goods Received Note' : 'Orevon Invoice';
     if (mode === 'share') {
       if (!(await Sharing.isAvailableAsync())) throw new Error('No sharing application is available.');
       await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: documentTitle });
@@ -300,12 +300,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const content = await response.bytes();
     if (!content.length || content.length > 15 * 1024 * 1024) throw new Error('Invalid or oversized catalog file.');
-    const file = new File(Paths.cache, `smartstock-${template ? 'import-template' : 'products'}-${Date.now()}.${format}`);
+    const file = new File(Paths.cache, `orevon-${template ? 'import-template' : 'products'}-${Date.now()}.${format}`);
     await file.write(content);
     if (!(await Sharing.isAvailableAsync())) throw new Error('No app is available to save/share the file.');
     await Sharing.shareAsync(file.uri, {
       mimeType: format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      dialogTitle: 'SmartStock product file',
+      dialogTitle: 'Orevon product file',
     });
   }, [renewAccess]);
 

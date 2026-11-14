@@ -30,8 +30,8 @@ def build_goods_received_note(po, receipt):
     doc = SimpleDocTemplate(
         buffer, pagesize=A4, leftMargin=13 * mm, rightMargin=13 * mm,
         topMargin=17 * mm, bottomMargin=17 * mm,
-        title=f"SmartStock GRN {po.number} #{receipt.pk}",
-        author='SmartStock',
+        title=f"Orevon GRN {po.number} #{receipt.pk}",
+        author='Orevon',
     )
     styles = getSampleStyleSheet()
     title = ParagraphStyle('GRNTitle', parent=styles['Heading1'], fontSize=18, leading=22, textColor=colors.HexColor('#047857'))
@@ -43,7 +43,7 @@ def build_goods_received_note(po, receipt):
         return Paragraph(_safe(value).replace('\n', '<br/>'), style)
 
     story = [
-        Paragraph('SMARTSTOCK', title),
+        Paragraph('OREVON', title),
         p('GOODS RECEIVED NOTE (GRN) — confirmation of physical stock receipt'),
         Spacer(1, 7 * mm),
         p(f'GRN: GRN-{receipt.pk:05d}'),
