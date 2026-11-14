@@ -28,6 +28,7 @@ type AuthContextValue = {
   apiDelete: <T>(path: string) => Promise<T>;
   apiUpload: <T>(path: string, formData: FormData) => Promise<T>;
   apiOpenPdf: (path: string, filename: string, mode?: 'preview' | 'share') => Promise<void>;
+  apiShareCatalog: (format: 'csv' | 'xlsx', template?: boolean) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -272,8 +273,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [renewAccess]);
 
+  const apiShareCatalog = useCallback(async (format: 'csv' | 'xlsx', template = false) => {
+    if (!API_URL) throw new Error('Mobile API URL is not configured.');
+    const path = `/products/bulk/${template ? 'template' : 'export'}/?file_format=${format}`;
+    let token = accessRef.current;
+    if (!token) throw new ApiError('Please sign in.', 401);
+    const download = (access: string) => expoFetch(`${API_URL}${path}`, {
+      method: 'GET', headers: { Authorization: `Bearer ${access}`, Accept: '*/*' },
+    });
+    let response = await download(token);
+    if (response.status === 401) {
+      token = await renewAccess();
+      response = await download(token);
+    }
+    if (!response.ok) {
+      let message = `Catalog download failed (HTTP ${response.status}).`;
+      try {
+        const error = JSON.parse(await response.text()) as { detail?: string };
+        if (error.detail) message = error.detail;
+      } catch { /* Keep HTTP fallback. */ }
+      throw new ApiError(message, response.status);
+    }
+    const expected = format === 'csv' ? 'text/csv' : 'spreadsheetml.sheet';
+    if (!(response.headers.get('content-type') || '').toLowerCase().includes(expected)) {
+      throw new Error('Unexpected file format returned by the server.');
+    }
+    const content = await response.bytes();
+    if (!content.length || content.length > 15 * 1024 * 1024) throw new Error('Invalid or oversized catalog file.');
+    const file = new File(Paths.cache, `smartstock-${template ? 'import-template' : 'products'}-${Date.now()}.${format}`);
+    await file.write(content);
+    if (!(await Sharing.isAvailableAsync())) throw new Error('No app is available to save/share the file.');
+    await Sharing.shareAsync(file.uri, {
+      mimeType: format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      dialogTitle: 'SmartStock product file',
+    });
+  }, [renewAccess]);
+
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, apiGet: requestAuthenticated, apiPost, apiPatch, apiDelete, apiUpload, apiOpenPdf }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut, apiGet: requestAuthenticated, apiPost, apiPatch, apiDelete, apiUpload, apiOpenPdf, apiShareCatalog }}>
       {children}
     </AuthContext.Provider>
   );

@@ -78,6 +78,31 @@ async function requestPdf(path: string, retry = true): Promise<Blob> {
   return blob;
 }
 
+/** Authenticated product CSV/XLSX download, including access-token refresh. */
+export async function downloadProductFile(path: string, filename: string): Promise<void> {
+  if (!/^\/products\/bulk\/(?:export|template)\/\?file_format=(?:csv|xlsx)$/.test(path)) {
+    throw new Error('Invalid catalog download path.');
+  }
+  const fetchFile = (token: string | null) => fetch(`${BASE}${path}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), Accept: '*/*' },
+  });
+  let res = await fetchFile(sessionStorage.getItem(ACCESS));
+  if (res.status === 401 && await refreshTokens()) {
+    res = await fetchFile(sessionStorage.getItem(ACCESS));
+  }
+  if (!res.ok) throw new Error(`Catalog download failed (${res.status})`);
+  const blob = await res.blob();
+  if (!blob.size || blob.size > 15 * 1024 * 1024) throw new Error('Invalid or oversized download.');
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 export const api = {
   login:async(username:string,password:string)=> {
     const tokens=await request<{access:string;refresh:string}>('/auth/login/',{method:'POST',body:JSON.stringify({username,password})},false);
@@ -107,6 +132,13 @@ export const api = {
   put:<T>(path:string,body:unknown)=>request<T>(path,{method:'PUT',body:JSON.stringify(body)}),
   patch:<T>(path:string,body:unknown)=>request<T>(path,{method:'PATCH',body:JSON.stringify(body)}),
   del:<T>(path:string)=>request<T>(path,{method:'DELETE'}),
+  bulkImport:<T>(file:File, mode:'create'|'upsert', commit:boolean)=> {
+    const data = new FormData();
+    data.append('file',file);
+    data.append('mode',mode);
+    data.append('commit',String(commit));
+    return request<T>('/products/bulk/import/',{method:'POST',body:data});
+  },
   uploadImage:<T>(id:number,file:File)=>{const form=new FormData();form.append('image',file);return request<T>(`/products/${id}/image/`,{method:'POST',body:form});},
   removeImage:<T>(id:number)=>request<T>(`/products/${id}/image/`,{method:'DELETE'}),
   list:async<T>(path:string):Promise<T[]>=>{

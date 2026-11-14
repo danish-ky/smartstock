@@ -15,6 +15,9 @@ from inventory.views import (
 )
 
 from inventory.purchase_orders import PurchaseOrderViewSet
+from inventory.product_bulk import (
+    BulkCatalogImportView, BulkCatalogExportView, BulkCatalogTemplateView,
+)
 
 router = DefaultRouter()
 router.register('categories', CategoryViewSet)
@@ -36,6 +39,9 @@ urlpatterns = [
     path('api/my/orders/<int:pk>/', MyOrderDetailView.as_view(), name='my-order-detail'),
     path('api/reports/', ReportsView.as_view(), name='reports'),
     path('api/inventory/adjust/', StockAdjustView.as_view(), name='adjust-stock'),
+    path('api/products/bulk/import/', BulkCatalogImportView.as_view(), name='bulk-product-import'),
+    path('api/products/bulk/export/', BulkCatalogExportView.as_view(), name='bulk-product-export'),
+    path('api/products/bulk/template/', BulkCatalogTemplateView.as_view(), name='bulk-product-template'),
     path('api/health/', HealthView.as_view(), name='health'),
     path('api/orders/<int:order_id>/payments/', ManualPaymentView.as_view(), name='order-payments'),
     path('api/orders/<int:order_id>/invoice/', OrderInvoiceView.as_view(), name='order-invoice'),

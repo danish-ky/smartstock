@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import { router, type Href } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { File } from 'expo-file-system';
@@ -336,6 +337,11 @@ export default function ProductsScreen() {
       {canManage && (
         <Pressable accessibilityRole="button" style={styles.createButton} onPress={() => openProductForm()}>
           <Text style={styles.actionText}>+ Add product</Text>
+        </Pressable>
+      )}
+      {canManage && (
+        <Pressable accessibilityRole="button" style={styles.createButton} onPress={() => router.push('/bulk-products' as Href)}>
+          <Text style={styles.actionText}>Import / Export CSV & Excel</Text>
         </Pressable>
       )}
       {!!choicesError && canManage && <Text style={styles.warning}>{choicesError}</Text>}

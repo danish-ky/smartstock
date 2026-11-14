@@ -11,6 +11,7 @@ export default function RootLayout() {
         <Stack.Screen name="reports" options={{ headerShown: true, title: 'Reports' }} />
         <Stack.Screen name="team" options={{ headerShown: true, title: 'Team & Access' }} />
         <Stack.Screen name="purchase-orders" options={{ headerShown: true, title: 'Purchase orders' }} />
+        <Stack.Screen name="bulk-products" options={{ headerShown: true, title: 'Bulk catalog tools' }} />
         <Stack.Screen name="explore" />
       </Stack>
     </AuthProvider>

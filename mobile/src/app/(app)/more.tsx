@@ -56,6 +56,13 @@ export default function AccountScreen() {
       )}
       {canManage && (
         <>
+          <SectionTitle>Bulk catalog tools</SectionTitle>
+          <View style={styles.links}>
+            <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/bulk-products' as Href)}>
+              <Text style={styles.linkTitle}>Import / Export products</Text>
+              <Text style={styles.linkSubtitle}>CSV and Excel · preview &amp; download</Text>
+            </Pressable>
+          </View>
           <SectionTitle>Analytics</SectionTitle>
           <View style={styles.links}>
             <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/reports' as Href)}>
