@@ -15,6 +15,7 @@ from inventory.views import (
 )
 
 from inventory.purchase_orders import PurchaseOrderViewSet
+from inventory.forecasting import InventoryForecastView
 from inventory.product_bulk import (
     BulkCatalogImportView, BulkCatalogExportView, BulkCatalogTemplateView,
 )
@@ -39,6 +40,7 @@ urlpatterns = [
     path('api/my/orders/<int:pk>/', MyOrderDetailView.as_view(), name='my-order-detail'),
     path('api/reports/', ReportsView.as_view(), name='reports'),
     path('api/inventory/adjust/', StockAdjustView.as_view(), name='adjust-stock'),
+    path('api/inventory/forecast/', InventoryForecastView.as_view(), name='inventory-forecast'),
     path('api/products/bulk/import/', BulkCatalogImportView.as_view(), name='bulk-product-import'),
     path('api/products/bulk/export/', BulkCatalogExportView.as_view(), name='bulk-product-export'),
     path('api/products/bulk/template/', BulkCatalogTemplateView.as_view(), name='bulk-product-template'),

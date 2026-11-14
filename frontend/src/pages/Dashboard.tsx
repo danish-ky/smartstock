@@ -8,11 +8,27 @@ import type { Dashboard } from '../types';
 import { canManage, money, number, shortDate } from '../lib';
 import { EmptyState, ErrorMessage, Loading, Metric, PageHeader, Panel, ProductAvatar, Status } from '../components/UI';
 
+type ForecastProduct = {
+ id:number; name:string; sku:string; stock:number; low_stock_threshold:number;
+ alert:'out'|'low'|'at_risk'|'healthy'; on_order_units:number; recent_units_sold:number;
+ average_daily_sales:number; days_remaining:number|null; suggested_reorder:number;
+ has_recent_sales:boolean;
+};
+type InventoryForecast = {
+ history_days:number; lead_days:number; target_days:number;
+ out_of_stock_count:number; low_stock_count:number; forecast_risk_count:number;
+ reorder_count:number; products:ForecastProduct[]; methodology:string;
+};
+
 export default function DashboardPage(){
  const {user}=useAuth();
  const [data,setData]=useState<Dashboard|null>(null);const [error,setError]=useState('');const [busy,setBusy]=useState(true);
+ const [forecast,setForecast]=useState<InventoryForecast|null>(null);
+ const [forecastError,setForecastError]=useState('');
+ const [forecastBusy,setForecastBusy]=useState(true);
  async function load(){setBusy(true);try{setData(await api.get<Dashboard>('/dashboard/'));setError('');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- useEffect(()=>{void load();},[]);
+ async function loadForecast(){setForecastBusy(true);try{setForecast(await api.get<InventoryForecast>('/inventory/forecast/?limit=12'));setForecastError('');}catch(e){setForecastError((e as Error).message);}finally{setForecastBusy(false);}}
+ useEffect(()=>{void load();void loadForecast();},[]);
  if(busy&&!data)return <Loading/>;
  if(error&&!data)return <ErrorMessage error={error} retry={load}/>;
  if(!data)return null;
@@ -26,5 +42,22 @@ export default function DashboardPage(){
    <Panel className="attention-panel" title="Stock health" action={<Link to="/inventory" className="text-link">View all <ArrowUpRight size={14}/></Link>}><div className="stock-health-ring"><div className="ring-visual" style={{background:`conic-gradient(#00bf8b 0 ${healthyPercentage}%, #f8ae43 0 100%)`}}><div><strong>{healthyPercentage}%</strong><span>Healthy stock</span></div></div></div><div className="stock-legend"><div><span className="legend-circle green"/>Healthy products<strong>{healthyProducts}</strong></div><div><span className="legend-circle amber"/>Low / out of stock<strong>{data.low_stock_count}</strong></div><div><span className="legend-circle blue"/>Stock valuation<strong>{money(data.stock_value)}</strong></div></div></Panel></div>
    <div className="dashboard-row bottom-row"><Panel title="Recent orders" className="recent-orders" action={<Link to="/orders" className="text-link">All orders <ArrowUpRight size={14}/></Link>}>{data.recent_orders.length?<div className="table-scroller"><table><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>DATE</th><th>TOTAL</th><th>STATUS</th></tr></thead><tbody>{data.recent_orders.map(o=><tr key={o.id}><td><strong className="code-cell">{o.number}</strong></td><td>{o.customer_name}</td><td>{shortDate(o.created_at)}</td><td className="td-strong">{money(o.total)}</td><td><Status value={o.status}/></td></tr>)}</tbody></table></div>:<EmptyState title="No orders yet" description="Your orders will appear here as soon as you create them."/>}</Panel>
    <Panel title="Needs attention" className="needs-attention" action={<Link to="/inventory" className="text-link">Restock <ArrowUpRight size={14}/></Link>}>{data.low_stock_products.length?<div className="attention-list">{data.low_stock_products.map(p=><div className="attention-item" key={p.id}><ProductAvatar name={p.name} category={p.category_name} imageUrl={p.image_url}/><div><strong>{p.name}</strong><span>{p.sku}</span></div><div className="attention-stock"><strong>{p.stock} left</strong><span>Min {p.low_stock_threshold}</span></div></div>)}</div>:<div className="all-good"><div>✓</div><strong>Everything looks good!</strong><p>No products currently need restocking.</p></div>}</Panel></div>
+   <div className="dashboard-row" style={{gridTemplateColumns:'minmax(0,1fr)'}}>
+     <Panel title="Forecast & restock alerts" action={<button type="button" className="btn btn-secondary btn-normal" onClick={()=>void loadForecast()} disabled={forecastBusy}>{forecastBusy?'Refreshing…':'Refresh estimates'}</button>}>
+       <p style={{fontSize:13,color:'#77839a',margin:'0 0 14px'}}>Read-only estimates from non-cancelled sales orders. Reorder suggestions are not automatic purchase orders.</p>
+       {forecastError && <ErrorMessage error={forecastError} retry={loadForecast}/>}
+       {forecastBusy && !forecast && <Loading/>}
+       {forecast && <>
+         <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:16}}>
+           <div style={{padding:'12px 16px',border:'1px solid #e7edf0',borderRadius:12}}><strong>{forecast.out_of_stock_count}</strong><div style={{fontSize:12,color:'#748295'}}>Out of stock</div></div>
+           <div style={{padding:'12px 16px',border:'1px solid #e7edf0',borderRadius:12}}><strong>{forecast.low_stock_count}</strong><div style={{fontSize:12,color:'#748295'}}>Low / out of stock</div></div>
+           <div style={{padding:'12px 16px',border:'1px solid #e7edf0',borderRadius:12}}><strong>{forecast.forecast_risk_count}</strong><div style={{fontSize:12,color:'#748295'}}>Forecast lead-time risk</div></div>
+           <div style={{padding:'12px 16px',border:'1px solid #e7edf0',borderRadius:12}}><strong>{forecast.reorder_count}</strong><div style={{fontSize:12,color:'#748295'}}>Products with reorder suggestions</div></div>
+         </div>
+         {forecast.products.length?<div className="table-scroller"><table><thead><tr><th>PRODUCT</th><th>STOCK</th><th>ON ORDER</th><th>ALERT</th><th>SOLD ({forecast.history_days}D)</th><th>DAYS LEFT*</th><th>SUGGESTED REORDER</th></tr></thead><tbody>{forecast.products.map(p=><tr key={p.id}><td><strong>{p.name}</strong><div className="code-cell" style={{fontSize:12}}>{p.sku}</div></td><td>{p.stock}</td><td>{p.on_order_units}</td><td><Status value={p.alert==='at_risk'?'low':p.alert}/>{p.alert==='at_risk'&&<span style={{fontSize:11,marginLeft:6}}>Lead-time risk</span>}</td><td>{p.recent_units_sold}</td><td>{p.days_remaining===null?'No recent sales':`${p.days_remaining} days`}</td><td><strong>{p.suggested_reorder}</strong></td></tr>)}</tbody></table></div>:<EmptyState title="No restock alerts" description="There are no stock shortages or recommended reorders in the current window."/>}
+         <p style={{fontSize:12,color:'#77839a',marginTop:14}}> * Days left uses a simple {forecast.history_days}-day average. Assumes {forecast.lead_days} delivery days and {forecast.target_days} additional cover days. Outstanding placed purchase orders reduce the new reorder suggestion. No recent sales = unknown coverage. Actual demand may differ.</p>
+       </>}
+     </Panel>
+   </div>
  </div>;
 }
