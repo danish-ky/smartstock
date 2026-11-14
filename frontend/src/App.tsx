@@ -8,6 +8,7 @@ import DashboardPage from './pages/Dashboard';
 import ProductsPage from './pages/Products';
 import InventoryPage from './pages/Inventory';
 import OrdersPage from './pages/Orders';
+import PurchaseOrdersPage from './pages/PurchaseOrders';
 import ContactsPage from './pages/Contacts';
 import CategoriesPage from './pages/Categories';
 import ReportsPage from './pages/Reports';
@@ -25,6 +26,7 @@ export default function App(){
    <Route path="/catalog" element={user.role==='user'?<CustomerCatalogPage/>:<Navigate to="/" replace/>}/>
    <Route path="/inventory" element={canOperate(user.role)?<InventoryPage/>:<Navigate to="/" replace/>}/>
    <Route path="/orders" element={canOperate(user.role)?<OrdersPage/>:<Navigate to="/" replace/>}/>
+   <Route path="/purchase-orders" element={canOperate(user.role)?<PurchaseOrdersPage/>:<Navigate to="/products" replace/>}/>
    <Route path="/customers" element={canOperate(user.role)?<ContactsPage kind="customers"/>:<Navigate to="/" replace/>}/>
    <Route path="/suppliers" element={canManage(user.role)?<ContactsPage kind="suppliers"/>:<Navigate to="/" replace/>}/>
    <Route path="/categories" element={canManage(user.role)?<CategoriesPage/>:<Navigate to="/" replace/>}/>

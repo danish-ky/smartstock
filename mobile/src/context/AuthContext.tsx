@@ -27,7 +27,7 @@ type AuthContextValue = {
   apiPatch: <T>(path: string, data: unknown) => Promise<T>;
   apiDelete: <T>(path: string) => Promise<T>;
   apiUpload: <T>(path: string, formData: FormData) => Promise<T>;
-  apiOpenPdf: (path: string, filename: string) => Promise<void>;
+  apiOpenPdf: (path: string, filename: string, mode?: 'preview' | 'share') => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -208,9 +208,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // PDF endpoints return binary, so they must not go through parseResponse(JSON).
   // Keep bearer tokens in memory and use the same access-token refresh logic.
-  const apiOpenPdf = useCallback(async (path: string, filename: string): Promise<void> => {
+  const apiOpenPdf = useCallback(async (path: string, filename: string, mode: 'preview' | 'share' = 'preview'): Promise<void> => {
     if (!API_URL) throw new Error('Mobile API URL is not configured.');
-    if (!/^\/orders\/\d+\/invoice\/$/.test(path)) throw new Error('Invalid invoice path.');
+    if (!/^(?:\/orders\/\d+\/invoice\/|\/purchase-orders\/\d+\/receipts\/\d+\/pdf\/)$/.test(path)) throw new Error('Invalid PDF path.');
     let token = accessRef.current;
     if (!token) throw new ApiError('Please sign in again.', 401);
     const download = (access: string) => expoFetch(`${API_URL}${path}`, {
@@ -256,13 +256,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.pdf$/i, '').slice(0, 100) || 'invoice';
     const file = new File(Paths.cache, `${safeName}-${Date.now()}.pdf`);
     await file.write(bytes);
+    const documentTitle = path.startsWith('/purchase-orders/') ? 'SmartStock Goods Received Note' : 'SmartStock Invoice';
+    if (mode === 'share') {
+      if (!(await Sharing.isAvailableAsync())) throw new Error('No sharing application is available.');
+      await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: documentTitle });
+      return;
+    }
     try {
-      await file.preview({ title: 'SmartStock Invoice' });
+      await file.preview({ title: documentTitle });
     } catch {
       if (!(await Sharing.isAvailableAsync())) {
         throw new Error('PDF saved temporarily, but no PDF viewer or sharing app is available.');
       }
-      await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: 'SmartStock Invoice' });
+      await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: documentTitle });
     }
   }, [renewAccess]);
 

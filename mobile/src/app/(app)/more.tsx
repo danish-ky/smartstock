@@ -34,6 +34,10 @@ export default function AccountScreen() {
       {canOperate && (
         <>
           <SectionTitle>Management</SectionTitle>
+          <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/purchase-orders' as Href)}>
+            <Text style={styles.linkTitle}>Purchase orders</Text>
+            <Text style={styles.linkSubtitle}>Supplier orders and received stock</Text>
+          </Pressable>
           <View style={styles.links}>
             <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/management?kind=categories' as Href)}>
               <Text style={styles.linkTitle}>Categories</Text>

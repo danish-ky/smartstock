@@ -14,12 +14,15 @@ from inventory.views import (
     MyOrderListView, MyOrderDetailView,
 )
 
+from inventory.purchase_orders import PurchaseOrderViewSet
+
 router = DefaultRouter()
 router.register('categories', CategoryViewSet)
 router.register('products', ProductViewSet, basename='products')
 router.register('suppliers', SupplierViewSet)
 router.register('customers', CustomerViewSet, basename='customers')
 router.register('orders', OrderViewSet)
+router.register('purchase-orders', PurchaseOrderViewSet, basename='purchase-orders')
 router.register('movements', StockMovementViewSet, basename='movements')
 router.register('users', UserViewSet, basename='users')
 urlpatterns = [

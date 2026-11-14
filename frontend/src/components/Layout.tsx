@@ -14,6 +14,7 @@ import {
   LogOut,
   Menu,
   Package,
+  PackageCheck,
   RefreshCw,
   Truck,
   Users,
@@ -40,6 +41,7 @@ const groups = [
       { path: '/products', label: 'Products', icon: Package },
       { path: '/inventory', label: 'Inventory', icon: Warehouse },
       { path: '/orders', label: 'Orders', icon: ClipboardList },
+      { path: '/purchase-orders', label: 'Purchase orders', icon: PackageCheck },
     ],
   },
   {
@@ -67,6 +69,7 @@ const titles: Record<string, string> = {
   '/products': 'Products',
   '/inventory': 'Inventory',
   '/orders': 'Orders',
+  '/purchase-orders': 'Purchase orders',
   '/customers': 'Customers',
   '/suppliers': 'Suppliers',
   '/categories': 'Categories',
@@ -215,7 +218,7 @@ export default function Layout() {
               {group.links.filter((link) => {
                 if (link.path === '/team') return user?.role === 'admin';
                 if (['/reports', '/suppliers', '/categories'].includes(link.path)) return isManager;
-                if (['/orders', '/inventory', '/customers', '/'].includes(link.path)) return isOperator;
+                if (['/orders', '/purchase-orders', '/inventory', '/customers', '/'].includes(link.path)) return isOperator;
                 return true;
               }).map(({ path, label, icon: Icon }) => (
                 <NavLink

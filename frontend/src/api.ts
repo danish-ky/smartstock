@@ -54,6 +54,30 @@ export async function request<T=unknown>(path:string, options:RequestInit={}, re
   if(res.status===204||res.status===205) return undefined as T;
   return res.json() as Promise<T>;
 }
+// Fetch binary PDFs with the same JWT refresh behavior as JSON endpoints.
+async function requestPdf(path: string, retry = true): Promise<Blob> {
+  const token = sessionStorage.getItem(ACCESS);
+  const response = await fetch(`${BASE}${path.startsWith('/') ? path : '/' + path}`, {
+    // DRF negotiates renderers before serving the binary FileResponse.
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), Accept: '*/*' },
+  });
+  if (response.status === 401 && retry && sessionStorage.getItem(REFRESH)) {
+    if (!refreshPromise) refreshPromise = refreshTokens().finally(() => { refreshPromise = null; });
+    if (await refreshPromise) return requestPdf(path, false);
+  }
+  if (!response.ok) {
+    let data: unknown;
+    try { data = await response.json(); } catch { data = `PDF request failed (HTTP ${response.status})`; }
+    throw new Error(details(data, response.status));
+  }
+  if (!(response.headers.get('content-type') || '').toLowerCase().includes('application/pdf')) {
+    throw new Error('Expected a PDF document from the server.');
+  }
+  const blob = await response.blob();
+  if (!blob.size || blob.size > 15 * 1024 * 1024) throw new Error('PDF is empty or too large.');
+  return blob;
+}
+
 export const api = {
   login:async(username:string,password:string)=> {
     const tokens=await request<{access:string;refresh:string}>('/auth/login/',{method:'POST',body:JSON.stringify({username,password})},false);
@@ -78,6 +102,7 @@ export const api = {
     clearSession();
   },
   get:<T>(path:string)=>request<T>(path),
+  pdf:(path:string)=>requestPdf(path),
   post:<T>(path:string,body:unknown)=>request<T>(path,{method:'POST',body:JSON.stringify(body)}),
   put:<T>(path:string,body:unknown)=>request<T>(path,{method:'PUT',body:JSON.stringify(body)}),
   patch:<T>(path:string,body:unknown)=>request<T>(path,{method:'PATCH',body:JSON.stringify(body)}),
