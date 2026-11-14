@@ -28,8 +28,13 @@ type Product = {
 type Movement = {
   id: number;
   product_name?: string;
+  product_sku?: string;
   movement_type: string;
   quantity: number;
+  stock_before?: number | null;
+  stock_after?: number | null;
+  order_number?: string | null;
+  performed_by_name?: string;
   note?: string;
   created_at?: string;
 };
@@ -230,14 +235,24 @@ function InventoryContent() {
         </KeyboardAvoidingView>
       </Modal>}
 
-      <SectionTitle>Recent stock movements</SectionTitle>
+      <SectionTitle>Stock audit trail</SectionTitle>
+      <Text style={styles.auditCaption}>Read-only history. Older entries may not have balance snapshots.</Text>
       <LoadNotice loading={movementsBusy && !movementsData} error={movementsError} onRetry={reloadMovements} />
       {!movementsError && movements.slice(0, 10).map(movement => (
         <InfoCard
           key={movement.id}
           title={`${movement.product_name || 'Product'} · ${movement.movement_type.toUpperCase()}`}
-          detail={movement.note || 'Stock movement recorded'}
-          trailing={`${movement.quantity} units`}
+          detail={[
+            `SKU: ${movement.product_sku || 'Not recorded'}`,
+            movement.stock_before == null || movement.stock_after == null
+              ? 'Before → After: unavailable (legacy entry)'
+              : `${movement.stock_before} → ${movement.stock_after} units`,
+            movement.note || 'Stock movement recorded',
+            movement.order_number ? `Order: ${movement.order_number}` : '',
+            movement.performed_by_name ? `By: ${movement.performed_by_name}` : '',
+            movement.created_at ? `At: ${new Date(movement.created_at).toLocaleString()}` : '',
+          ].filter(Boolean).join(' · ')}
+          trailing={`${movement.movement_type === 'in' || movement.movement_type === 'return' ? '+' : '−'}${movement.quantity} units`}
         />
       ))}
       {movementsData && !movements.length && !movementsError && (
@@ -257,6 +272,7 @@ export default function InventoryScreen() {
 
 const styles = StyleSheet.create({
   productCard: { marginBottom: 8 },
+  auditCaption: { color: '#64748B', fontSize: 12, marginBottom: 10, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   smallButton: { flex: 1, alignItems: 'center', borderRadius: 11, paddingVertical: 11 },
   inButton: { backgroundColor: '#D1FAE5' },

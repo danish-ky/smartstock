@@ -157,10 +157,17 @@ class OrderCreateSerializer(serializers.Serializer):
 class StockMovementSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     performed_by_name = serializers.CharField(source='performed_by.username', read_only=True)
+    order_number = serializers.SerializerMethodField()
+
+    def get_order_number(self, obj):
+        return obj.order.number if obj.order_id else None
+
     class Meta:
         model = StockMovement
-        fields = ('id','product','product_name','movement_type','quantity','note','order',
-                  'performed_by_name','created_at')
+        fields = ('id', 'product', 'product_name', 'product_sku', 'movement_type',
+                  'quantity', 'stock_before', 'stock_after', 'note', 'order',
+                  'order_number', 'performed_by_name', 'created_at')
+        read_only_fields = fields
 
 class StockAdjustSerializer(serializers.Serializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.filter(is_active=True))

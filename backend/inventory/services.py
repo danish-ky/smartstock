@@ -22,6 +22,7 @@ def adjust_stock(*, product_id, movement_type, quantity, actor, note=''):
             'quantity': f'Insufficient stock: {product.stock} available.'
         })
 
+    stock_before = product.stock
     product.stock = (
         product.stock + quantity
         if movement_type == 'in'
@@ -34,7 +35,10 @@ def adjust_stock(*, product_id, movement_type, quantity, actor, note=''):
         product=product,
         movement_type=movement_type,
         quantity=quantity,
-        note=note,
+        stock_before=stock_before,
+        stock_after=product.stock,
+        product_sku=product.sku,
+        note=note or ('Manual stock in' if movement_type == 'in' else 'Manual stock out'),
         performed_by=actor
     )
 
@@ -117,6 +121,7 @@ def place_order(*, customer, lines, actor, notes=''):
             unit_price=price
         )
 
+        stock_before = product.stock
         product.stock -= qty
         product.save(update_fields=['stock', 'updated_at'])
 
@@ -124,6 +129,9 @@ def place_order(*, customer, lines, actor, notes=''):
             product=product,
             movement_type='sale',
             quantity=qty,
+            stock_before=stock_before,
+            stock_after=product.stock,
+            product_sku=product.sku,
             order=order,
             performed_by=actor,
             note=f'Order {order.number}'
@@ -169,6 +177,7 @@ def change_order_status(*, order_id, status, actor):
                 pk=item.product_id
             )
 
+            stock_before = product.stock
             product.stock += item.quantity
             product.save(update_fields=['stock', 'updated_at'])
 
@@ -176,6 +185,9 @@ def change_order_status(*, order_id, status, actor):
                 product=product,
                 movement_type='return',
                 quantity=item.quantity,
+                stock_before=stock_before,
+                stock_after=product.stock,
+                product_sku=product.sku,
                 order=order,
                 performed_by=actor,
                 note=f'Cancelled {order.number}'

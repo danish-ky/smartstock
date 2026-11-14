@@ -105,6 +105,11 @@ class StockMovement(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='movements')
     movement_type = models.CharField(max_length=8, choices=Types.choices)
     quantity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    # Snapshots are captured by the atomic stock services, not calculated from today's balance.
+    # Existing legacy movements remain readable; their historical balances are unknown.
+    stock_before = models.PositiveIntegerField(null=True, blank=True, editable=False)
+    stock_after = models.PositiveIntegerField(null=True, blank=True, editable=False)
+    product_sku = models.CharField(max_length=64, blank=True, default='', editable=False)
     note = models.CharField(max_length=240, blank=True)
     order = models.ForeignKey(Order, null=True, blank=True, on_delete=models.PROTECT, related_name='movements')
     performed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='stock_movements')
