@@ -1,8 +1,23 @@
-# SmartStock — Inventory & Order Management
+# Orevon - Smart Inventory & Order Management
 
 A professional **React + TypeScript + Tailwind CSS** web dashboard with a **Django REST Framework API**, JWT login, custom roles, catalog management, inventory audit trail, customers, suppliers, sales orders, and analytics.
 
-> **Codebxo assessment scope:** This package implements the **web application + API + database schema**. An Android app, production deployment, and demo screen recording are separate submission deliverables and are **not** included in this ZIP. The project has been statically checked but dependency installation / API runtime tests could not be executed in the generation environment (no package registry network access). Run the commands below locally and fix any reported environment-specific issues before submitting.
+## Live deployment
+
+Orevon is a deployed inventory and order management system with a React web application, Django REST API, PostgreSQL database, and Expo React Native Android application.
+
+| Component | Link |
+|---|---|
+| Live web application | https://orevon-web.vercel.app/login |
+| Backend REST API | https://smartstock-rjxl.onrender.com/api/ |
+| API health check | https://smartstock-rjxl.onrender.com/api/health/ |
+| Swagger API documentation | https://smartstock-rjxl.onrender.com/api/docs/ |
+| Android APK build | https://expo.dev/accounts/danishky/projects/mobile/builds/c1ddde96-c9ea-48d9-a0fe-21700a9ece18 |
+| Source repository | https://github.com/danish-ky/smartstock |
+
+The Android APK is an internal assessment build, not a Google Play Store release. The Expo build page provides installation access.
+
+The web and Android applications use the same hosted API and PostgreSQL database. Local development instructions are retained below.
 
 ## Stack
 
@@ -223,13 +238,15 @@ npm run typecheck
 npm run build
 ```
 
-**Current verification:** Python syntax compilation passed; TypeScript/TSX parse checks passed. Django API tests and npm production build were *not* executed during package creation because Django/React dependencies could not be downloaded in this environment. Do not report tests as passed until your own environment executes them successfully.
+**Current verification (November 15, 2026):** The hosted web application was manually tested for login, product creation, inventory adjustments, customer creation, and sales order stock deduction. The Android APK was built successfully using EAS, installed on a physical Android device, and authenticated successfully. An Android stock-in adjustment from 3 to 4 units was confirmed in the Android audit trail and hosted website. Mobile TypeScript and Expo dependency checks passed. These are verified manual results, not a claim that every automated test or application feature has passed. See QA_STATUS.md for additional test documentation.
 
 ## 9. Suggested assessment demo
 
-Record a short screen capture showing: login → overview → add category and product → stock-in → create customer → place order → observe automatic stock deduction → fulfill/cancel another order → verify updated audit log → reports/date filtering → Swagger API docs → Android app (separate deliverable) → hosted URLs.
+Record a short screen capture showing: login → overview → add category and product → stock-in → create customer → place order → observe automatic stock deduction → fulfill/cancel another order → verify updated audit log → reports/date filtering → Swagger API docs → installed Orevon Android APK → hosted URLs.
 
 ## 10. Project layout
+
+The monorepo contains `backend/` (Django REST API), `frontend/` (React web application), and `mobile/` (Expo React Native Android application).
 
 ```
 smartstock_web/
@@ -242,7 +259,7 @@ smartstock_web/
 │   ├── config/           # settings, URLs, WSGI
 │   ├── accounts/         # JWT session, custom user model, admin role
 │   └── inventory/        # catalog, orders, stock, reports, tests, migrations
-└── frontend/
+├── frontend/
     ├── index.html
     ├── package.json
     ├── .env.example
@@ -252,8 +269,9 @@ smartstock_web/
         ├── components/   # sidebar, UI primitives
         └── pages/        # Login, Dashboard, Products, Inventory,
                           # Orders, Contacts, Categories, Reports, Team
+└── mobile/    # Expo React Native Android app
 ```
 
-## Integration note for your previous SmartStock work
+## Monorepo and migration safety
 
-You previously started a Django backend locally. **This is a complete new standalone version**, not a patch to that existing repository. Back up your current work first, run this version with a fresh local SQLite database, then selectively merge functionality after comparing models/routes. Never replace a live PostgreSQL schema or migration history without a migration plan.
+The active Orevon repository contains the backend, frontend, and mobile applications. Local development and production use different database configurations. Back up data before changing database connections or migrations. Never replace the hosted PostgreSQL schema or migration history without a migration plan.
