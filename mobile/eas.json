@@ -1,0 +1,14 @@
+{
+    "build":  {
+                  "preview":  {
+                                  "distribution":  "internal",
+                                  "environment":  "production",
+                                  "env":  {
+                                              "EXPO_PUBLIC_API_URL":  "https://smartstock-rjxl.onrender.com/api"
+                                          },
+                                  "android":  {
+                                                  "buildType":  "apk"
+                                              }
+                              }
+              }
+}
