@@ -2,63 +2,94 @@
 
 Updated: November 16, 2026
 
-This report separates confirmed manual checks from automated tests and unverified features. The original November 11 verification report is retained below for historical reference.
+**Assessment:** Codebxo Full Stack Developer Internship — Smart Inventory & Order Management System
 
-## Current verification - 2026-11-16
+**Verification standard:** Automated outcomes below come from executed Django commands; manual outcomes reflect functional checks performed by the developer. A working feature, a passing backend test, and a comprehensive end-to-end/security audit are different levels of assurance. The historical November 11 snapshot is preserved at the end for traceability; its old NOT TESTED labels are **not** the current project status.
 
-| Requirement | Status | Evidence |
+## Executive test summary
+
+| Metric | Result | Evidence |
 |---|---|---|
-| Hosted PostgreSQL connectivity | PASS - manual | Django successfully connected to the Render PostgreSQL database |
-| Production API health | PASS - manual | Hosted `/api/health/` returned HTTP 200 |
-| Admin JWT authentication | PASS - manual | Hosted admin login returned JWT tokens |
-| Web login and dashboard | PASS - manual | Live Vercel website login and dashboard verified |
-| Web Products active/archived selector | PASS - manual visual | Updated live Web Products screen displayed the archived view; retrieval of a real archived record was not tested |
-| Web forecast dashboard layout | PASS - manual visual | Redesigned Forecast & Restock Alerts section displayed correctly on the live Vercel dashboard |
-| Local forecast refresh endpoint | PASS - manual | Browser Network tab showed GET http://127.0.0.1:8000/api/inventory/forecast/?limit=12 returning HTTP 200; this checked the local Django API, not the production endpoint |
-| Category and product creation | PASS - manual | Electronics category and test product created |
-| Stock adjustment and audit trail | PASS - manual | Stock-in and stock-out transactions verified |
-| Customer creation | PASS - manual | Test customer created through hosted website |
-| Sales order stock deduction | PASS - manual | SO-00001 reduced inventory by one unit |
-| Updated Android APK build | PASS - build | Expo EAS preview build 0ff1e41b-8046-4d2d-8711-a726b4c5a333 reported Build finished |
-| Android installation and launch | PASS - manual | APK installed and login screen displayed on physical device |
-| Android authentication | PASS - manual | Admin login opened the Android dashboard |
-| Updated Android product screens | PASS - manual visual | New APK installed on a physical Android device; Add/Edit Product headings and Archived Products selector were visible in screenshots |
-| Shared Web and Android data | PASS - manual | Dashboard records and inventory quantities matched |
-| Android-to-Web stock update | PASS - manual | Android stock adjustment from 3 to 4 units appeared on hosted website |
-| Android audit trail | PASS - manual | Adjustment recorded with note Android APK sync test |
-| Web TypeScript and production build | PASS - local check | `npm run typecheck` and `npm run build` completed successfully after the forecast redesign (Vite reported a nonblocking chunk-size warning) |
-| Mobile TypeScript | PASS - local check | `npx.cmd tsc --noEmit` completed without errors |
-| Expo dependencies | PASS - local check | `npx.cmd expo install --check` reported dependencies up to date |
-| Swagger documentation | PASS - manual | Production Swagger UI and product endpoint documentation displayed |
+| Backend automated regression suite | **PASS — 88/88 tests, 0 failures** | `python manage.py test --verbosity 1`; isolated local PostgreSQL test DB, `OK`, 197.477 seconds |
+| Focused JWT/archival security suite | **PASS — 5/5 tests** | `python manage.py test accounts.test_submission_security --verbosity 1`; `OK`, 20.664 seconds (these five tests are included in the 88) |
+| Django configuration | **PASS** | `python manage.py check` — 0 issues |
+| Migration consistency | **PASS** | `python manage.py makemigrations --check --dry-run` — no changes detected |
+| Web type checking and production build | **PASS** | `npm run typecheck`; `npm run build` after forecast UI update; nonblocking Vite chunk-size warning |
+| Mobile type checking and Expo dependency check | **PASS** | `npx.cmd tsc --noEmit`; `npx.cmd expo install --check` |
+| Android preview APK build | **PASS** | EAS preview build `0ff1e41b-8046-4d2d-8711-a726b4c5a333` completed successfully |
+| Physical Android installation and login | **PASS — manual** | Updated Orevon APK installed; app opened and authenticated |
+| Web/Android shared inventory synchronization | **PASS — manual** | Android stock-in from 3 to 4 reflected in hosted Web and stock audit trail |
 
-## Checks not yet fully verified
+The 88 tests are **one successful combined regression run**; the five focused tests are part of that total, not five extra tests on top of 88. Django created and destroyed the isolated local test database for this run; no production records were changed.
 
-| Requirement | Status |
-|---|---|
-| Full Django automated API test suite | NOT VERIFIED in this report |
-| Retrieval of real archived products in Web and Android views | NOT VERIFIED; only the interfaces were visually inspected |
-| Archived-product visibility across every role | NOT FULLY TESTED; API role checks for the new views were not run end-to-end |
-| Forecast calculation accuracy against known sales samples | NOT VERIFIED; only displayed data and local HTTP 200 refresh were checked |
-| Newly created evaluator account login and permissions | NOT CONFIRMED in this report |
-| All Admin, Manager, Staff and User permission combinations | NOT FULLY TESTED |
-| JWT logout and refresh-token blacklisting | NOT VERIFIED |
-| Product, category, customer and supplier complete CRUD coverage | PARTIALLY TESTED |
-| Duplicate SKU, invalid input and insufficient stock rejection | NOT VERIFIED |
-| Order fulfillment, cancellation and automatic restocking | NOT VERIFIED |
-| Purchase-order receiving workflow | NOT VERIFIED |
-| Payment processing and Razorpay integration | NOT VERIFIED |
-| Complete CSV export and report filtering | NOT VERIFIED |
-| Automated accessibility and security tests | NOT VERIFIED |
+## Codebxo required modules — current verification
 
-No test is marked as passed solely because its code exists. No failures were established by the evidence summarized here; unverified features must not be treated as passed.
+| Required module | Status | Evidence and scope |
+|---|---|---|
+| 1. Authentication and roles | **PASS — automated + developer manual** | Four-role JWT login and API authorization tests passed; the developer also reports successful role logins. Logout, invalid-token handling and refresh blacklisting passed the focused tests. |
+| 2. Dashboard | **PASS — automated + manual** | Dashboard/reports consistency covered by automated API tests; production dashboard KPI and forecast layout displayed correctly. |
+| 3. Product management | **PASS — automated + developer manual** | Duplicate SKU, stock immutability, role permissions, image restrictions and bulk validation covered by tests. Developer reports product/category CRUD and search working in the UI. |
+| 4. Inventory management | **PASS — automated + manual** | Stock-in/out, no-negative-stock validation, audit snapshots, low-stock alerts and Android-to-Web inventory sync verified. |
+| 5. Customer management | **PASS — developer manual + selected automated checks** | Developer reports customer/supplier CRUD working. Automated customer portal privacy, permissions and related validation tests passed. |
+| 6. Order management | **PASS — automated + developer manual** | Creating an order deducts stock, cancellation restores stock, invalid overselling is rejected, and audit data stays consistent in automated tests. Developer reports order workflow working. |
+| 7. Reports | **PASS — automated + manual** | Dashboard/reports API tests passed; production reports available and developer reports using them. |
 
-## Deployment references
+**Manual verification note:** Candidate-reported UI checks are recorded as manual tests, not as independently executed browser automation. “PASS” here describes the tested scenarios; it is not a claim that every possible input, device or edge case was exhaustively tested.
 
-- Web: https://orevon-web.vercel.app/login
-- API: https://smartstock-rjxl.onrender.com/api/
-- Swagger: https://smartstock-rjxl.onrender.com/api/docs/
-- Android build: https://expo.dev/accounts/danishky/projects/mobile/builds/0ff1e41b-8046-4d2d-8711-a726b4c5a333
-- Repository: https://github.com/danish-ky/smartstock
+## Automated backend coverage — executed
+
+| Test group | Tests passed | Scope |
+|---|---:|---|
+| Four-role authentication and authorization | 7 | Role logins, protected endpoints, denied operations |
+| Billing and payment validation logic | 10 | Payment invariants, invoice privacy, duplicate/signature checks |
+| Bulk products and import/export | 11 | CSV/Excel, atomic validation, permission enforcement |
+| Customer portal | 8 | Ownership, privacy, access restrictions |
+| Forecasting | 12 | Sales windows, lead-time risk, reorder calculations, read-only behavior |
+| Product image handling | 4 | Allowed uploads, restricted access, invalid images |
+| Purchase orders | 9 | Placement, receiving, rollback, role restrictions |
+| Goods-received-note PDF | 5 | Document access and nonmutating download |
+| Stock audit | 5 | Inventory snapshots and cancellation restoration |
+| Core inventory and orders APIs | 12 | SKU validation, stock and order operations, reports |
+| Additional JWT logout and archived-product security | 5 | Refresh blacklist, invalid logout, archive visibility and authorization |
+| **Total** | **88** | **All PASS** |
+
+All tests were run against Django's isolated local PostgreSQL test database. This establishes backend test behavior, **not** full production or live-payment integration coverage.
+
+## Web, Android, and deployment verification
+
+| Component / workflow | Status | Evidence |
+|---|---|---|
+| Hosted Web login, dashboard and product creation | PASS — manual | Vercel app used with hosted API; Electronics category and test product created |
+| Stock in/out and audit trail | PASS — manual | Stock adjustments recorded; stock balance and movement history checked |
+| Customer, supplier, product and category CRUD | PASS — developer manual | Developer reports these CRUD workflows working; complete edge-case matrix not separately recorded |
+| Sales order and live inventory deduction | PASS — manual | Order `SO-00001` reduced stock, previously checked in production |
+| Active / Archived Products controls in Web and Android | PASS — visual manual | Archived section/selector displayed in both apps; actual archived-record retrieval in both UIs not yet evidenced |
+| Updated Add/Edit Product headings in Android | PASS — visual manual | Installed updated APK screenshots reviewed |
+| Forecast dashboard UI | PASS — visual manual | Redesigned section displayed on live Web app |
+| Local forecast refresh | PASS — manual API | `GET http://127.0.0.1:8000/api/inventory/forecast/?limit=12` returned HTTP 200 (local API, not production API) |
+| Swagger / API documentation | PASS — manual | Hosted Swagger page displayed endpoint documentation |
+| Production API connectivity | PASS — manual | Hosted health endpoint returned HTTP 200; hosted PostgreSQL connection verified |
+| APK installation | PASS — manual | EAS APK installed and launched on a physical Android device |
+
+## Remaining verification boundaries (not failures)
+
+- **Archived record retrieval in both Web and Android:** the screens were visually verified and backend role/archival tests passed, but a saved archived record was not separately demonstrated in each UI.
+- **End-to-end browser/Android automation:** manual workflows and backend automated tests passed; comprehensive automated UI regression across all devices and every role was not performed.
+- **Accessibility and security audits:** targeted JWT, roles, privacy, authorization and validation tests passed; a full WCAG accessibility audit and independent penetration test were not performed.
+- **External live payments:** billing and Razorpay signature/duplicate-protection tests passed using test scenarios; a real external gateway payment was not confirmed.
+- **Exhaustive edge-case coverage:** developer reports key CRUD workflows working, but not every CRUD/CSV/export/filter combination has a separately recorded end-to-end test.
+
+No failed tests were observed in the executed 88-test backend suite. Remaining boundaries are not evidence that the features are broken.
+
+## Deployment and assessment references
+
+- **Web application:** https://orevon-web.vercel.app/login
+- **Backend API:** https://smartstock-rjxl.onrender.com/api/
+- **API documentation:** https://smartstock-rjxl.onrender.com/api/docs/
+- **Updated Android APK:** https://expo.dev/accounts/danishky/projects/mobile/builds/0ff1e41b-8046-4d2d-8711-a726b4c5a333
+- **Source code:** https://github.com/danish-ky/smartstock
+- **Database ER diagram:** [ER_DIAGRAM.md](ER_DIAGRAM.md)
+- **Installation and setup:** [README.md](README.md)
 
 ---
 
