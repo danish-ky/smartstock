@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import { router, type Href } from 'expo-router';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Page, SectionTitle } from '../../components/MobileUI';
+import { Alert } from 'react-native';
+import OrevonAccountView, { type OrevonAccountSection } from '../../components/account/OrevonAccountView';
 import { useAuth } from '../../context/AuthContext';
 
+/**
+ * Stage 5.3: presentation is delegated to OrevonAccountView.
+ * Existing role checks, route destinations, and sign-out behavior are preserved.
+ */
 export default function AccountScreen() {
   const { user, signOut } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -23,83 +27,93 @@ export default function AccountScreen() {
     }
   }
 
+  // Keep the same permission gates and onPress destinations as the original Account screen.
+  const sections: OrevonAccountSection[] = [];
+  if (canOperate) {
+    sections.push({
+      key: 'management',
+      title: 'Management',
+      actions: [
+        {
+          key: 'purchase-orders',
+          title: 'Purchase orders',
+          description: 'Supplier orders and received stock',
+          onPress: () => router.push('/purchase-orders' as Href),
+        },
+        {
+          key: 'categories',
+          title: 'Categories',
+          description: 'Manage product categories',
+          onPress: () => router.push('/management?kind=categories' as Href),
+        },
+        {
+          key: 'suppliers',
+          title: 'Suppliers',
+          description: 'View and manage supplier contacts',
+          onPress: () => router.push('/management?kind=suppliers' as Href),
+        },
+        {
+          key: 'customers',
+          title: 'Customers',
+          description: 'View and manage customer contacts',
+          onPress: () => router.push('/management?kind=customers' as Href),
+        },
+      ],
+    });
+  }
+  if (canManage) {
+    sections.push(
+      {
+        key: 'bulk-catalog',
+        title: 'Bulk catalog tools',
+        actions: [
+          {
+            key: 'bulk-products',
+            title: 'Import / Export products',
+            description: 'CSV and Excel · preview & download',
+            onPress: () => router.push('/bulk-products' as Href),
+          },
+        ],
+      },
+      {
+        key: 'analytics',
+        title: 'Analytics',
+        actions: [
+          {
+            key: 'reports',
+            title: 'Reports & Analytics',
+            description: 'Sales, top products and stock by category',
+            onPress: () => router.push('/reports' as Href),
+          },
+        ],
+      },
+    );
+  }
+  if (isAdmin) {
+    sections.push({
+      key: 'administration',
+      title: 'Administration',
+      actions: [
+        {
+          key: 'team',
+          title: 'Team & Access',
+          description: 'Manage login accounts, roles and permissions',
+          onPress: () => router.push('/team' as Href),
+        },
+      ],
+    });
+  }
+
   return (
-    <Page title="Account" subtitle="Orevon mobile profile">
-      <SectionTitle>Signed in as</SectionTitle>
-      <View style={styles.card}>
-        <Text style={styles.name}>{user?.full_name || user?.name || user?.username || 'Orevon User'}</Text>
-        <Text style={styles.meta}>{user?.email || user?.username || ''}</Text>
-        <Text style={styles.role}>{user?.role || 'User'}</Text>
-      </View>
-      {canOperate && (
-        <>
-          <SectionTitle>Management</SectionTitle>
-          <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/purchase-orders' as Href)}>
-            <Text style={styles.linkTitle}>Purchase orders</Text>
-            <Text style={styles.linkSubtitle}>Supplier orders and received stock</Text>
-          </Pressable>
-          <View style={styles.links}>
-            <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/management?kind=categories' as Href)}>
-              <Text style={styles.linkTitle}>Categories</Text>
-              <Text style={styles.linkSubtitle}>Manage product categories</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/management?kind=suppliers' as Href)}>
-              <Text style={styles.linkTitle}>Suppliers</Text>
-              <Text style={styles.linkSubtitle}>View and manage supplier contacts</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/management?kind=customers' as Href)}>
-              <Text style={styles.linkTitle}>Customers</Text>
-              <Text style={styles.linkSubtitle}>View and manage customer contacts</Text>
-            </Pressable>
-          </View>
-        </>
-      )}
-      {canManage && (
-        <>
-          <SectionTitle>Bulk catalog tools</SectionTitle>
-          <View style={styles.links}>
-            <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/bulk-products' as Href)}>
-              <Text style={styles.linkTitle}>Import / Export products</Text>
-              <Text style={styles.linkSubtitle}>CSV and Excel · preview &amp; download</Text>
-            </Pressable>
-          </View>
-          <SectionTitle>Analytics</SectionTitle>
-          <View style={styles.links}>
-            <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/reports' as Href)}>
-              <Text style={styles.linkTitle}>Reports & Analytics</Text>
-              <Text style={styles.linkSubtitle}>Sales, top products and stock by category</Text>
-            </Pressable>
-          </View>
-        </>
-      )}
-      {isAdmin && (
-        <>
-          <SectionTitle>Administration</SectionTitle>
-          <View style={styles.links}>
-            <Pressable accessibilityRole="button" style={styles.link} onPress={() => router.push('/team' as Href)}>
-              <Text style={styles.linkTitle}>Team & Access</Text>
-              <Text style={styles.linkSubtitle}>Manage login accounts, roles and permissions</Text>
-            </Pressable>
-          </View>
-        </>
-      )}
-      <SectionTitle>Session</SectionTitle>
-      <Pressable accessibilityRole="button" style={styles.logout} onPress={logout} disabled={busy}>
-        {busy ? <ActivityIndicator color="white" /> : <Text style={styles.logoutText}>Sign Out</Text>}
-      </Pressable>
-    </Page>
+    <OrevonAccountView
+      displayName={user?.full_name || user?.name || user?.username || 'Orevon User'}
+      email={user?.email || user?.username || ''}
+      role={user?.role || 'User'}
+      subtitle="Orevon mobile profile"
+      sections={sections}
+      onSignOut={logout}
+      signOutDisabled={busy}
+      signOutLoading={busy}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  links: { gap: 10 },
-  link: { backgroundColor: '#FFFFFF', borderRadius: 13, padding: 17 },
-  linkTitle: { color: '#0F172A', fontWeight: '800', fontSize: 16 },
-  linkSubtitle: { color: '#64748B', marginTop: 5, fontSize: 12 },
-  card: { padding: 21, backgroundColor: 'white', borderRadius: 17 },
-  name: { fontSize: 21, fontWeight: '800', color: '#0F172A' },
-  meta: { color: '#64748B', marginTop: 8 },
-  role: { color: '#047857', fontWeight: '700', marginTop: 12, textTransform: 'capitalize' },
-  logout: { padding: 16, backgroundColor: '#334155', borderRadius: 12, alignItems: 'center' },
-  logoutText: { color: 'white', fontWeight: '700' },
-});

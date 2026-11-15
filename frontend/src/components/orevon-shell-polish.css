@@ -1,0 +1,140 @@
+/*
+ * Orevon Stage 5.2 — optional shell-only polish.
+ * To revert, remove this import from Layout.tsx or use restore_stage5_2.py.
+ * Existing globals, pages, data behavior, sidebar state, links and roles stay intact.
+ */
+.app-shell .sidebar {
+  background: linear-gradient(155deg, #071d30 0%, #09293a 58%, #08343c 100%);
+  border-right: 1px solid rgba(116, 224, 198, .11);
+  box-shadow: 8px 0 32px rgba(4, 29, 42, .08);
+}
+.app-shell .sidebar-logo {
+  border-bottom: 1px solid rgba(213, 249, 238, .08);
+  margin-bottom: 22px;
+}
+.app-shell .sidebar-logo .logo-mark {
+  background: linear-gradient(140deg, #08b894 0%, #087f83 100%);
+  border: 1px solid rgba(158, 255, 230, .28);
+  border-radius: 14px;
+  box-shadow: 0 9px 23px rgba(1, 15, 22, .25), inset 0 1px rgba(255,255,255,.18);
+}
+.app-shell .sidebar-logo strong {
+  letter-spacing: -.7px;
+}
+.app-shell .sidebar-logo small {
+  color: #93bac2;
+}
+.app-shell .workspace-switch {
+  background: rgba(255, 255, 255, .055);
+  border: 1px solid rgba(170, 230, 217, .14);
+  box-shadow: inset 0 1px rgba(255,255,255,.04);
+  border-radius: 14px;
+}
+.app-shell .workspace-icon {
+  background: rgba(83, 224, 180, .13);
+  color: #86e3cd;
+}
+.app-shell .sidebar .nav-label {
+  color: #82a9b9;
+  font-weight: 800;
+  letter-spacing: .15em;
+}
+.app-shell .sidebar .nav-item {
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #b8d0d9;
+  transition: background-color .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.app-shell .sidebar .nav-item:hover {
+  color: #fff;
+  border-color: rgba(143, 231, 210, .14);
+  background: rgba(132, 233, 204, .105);
+}
+.app-shell .sidebar .nav-item.active {
+  background: linear-gradient(100deg, #0caa8b, #087f86);
+  border-color: rgba(187, 255, 238, .17);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(3, 28, 37, .18), inset 0 1px rgba(255,255,255,.13);
+}
+.app-shell .sidebar .nav-item.active::before {
+  background: #b1ffdf;
+}
+.app-shell .sidebar .nav-item.active > svg {
+  color: #e5fff7;
+}
+.app-shell .sidebar .sidebar-support {
+  background: linear-gradient(145deg, rgba(174, 255, 228, .075), rgba(53, 148, 146, .045));
+  border-color: rgba(162, 231, 212, .15);
+  border-radius: 15px;
+}
+.app-shell .sidebar .sidebar-support p {
+  color: #adcad2;
+}
+.app-shell .sidebar .sidebar-logout {
+  border-radius: 10px;
+  transition: background .18s ease, color .18s ease;
+}
+.app-shell .sidebar .sidebar-logout:hover {
+  background: rgba(255,255,255,.07);
+  color: #fff;
+}
+.app-shell .topbar {
+  background: rgba(255, 255, 255, .96);
+  border-bottom: 1px solid #e3eef0;
+  box-shadow: 0 5px 21px rgba(12, 48, 62, .035);
+  backdrop-filter: blur(12px);
+}
+.app-shell .topbar-left {
+  min-width: 0;
+}
+.app-shell .topbar-left .breadcrumb {
+  color: #849aaa;
+}
+.app-shell .topbar-left strong {
+  color: #102f40;
+  letter-spacing: -.1px;
+}
+.app-shell .topbar .header-date {
+  color: #7b8f9d;
+}
+.app-shell .topbar .user-avatar {
+  background: linear-gradient(145deg, #e1fff1, #c6f2e8);
+  border: 1px solid #bdeadc;
+  color: #087d69;
+  border-radius: 12px;
+}
+.app-shell .topbar .user-chip strong {
+  color: #102f40;
+}
+.app-shell .topbar .topbar-bell {
+  border-radius: 10px;
+}
+.app-shell .topbar .topbar-bell:hover {
+  background: #f0f7f7;
+  color: #0c816d;
+}
+.app-shell .app-footer {
+  background: #f8fbfc;
+  border-top-color: #e6eff1;
+}
+.app-shell .sidebar :is(a, button):focus-visible,
+.app-shell .topbar :is(a, button):focus-visible {
+  outline: 2px solid #71e1c0;
+  outline-offset: 2px;
+}
+@media (max-width: 850px) {
+  .app-shell .topbar {
+    padding-inline: 16px;
+  }
+  .app-shell .topbar-left strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .sidebar .nav-item,
+  .app-shell .sidebar .sidebar-logout {
+    transition: none;
+  }
+}
