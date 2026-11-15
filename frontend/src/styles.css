@@ -388,3 +388,111 @@ tbody tr:hover { background:linear-gradient(100deg,#f6fcfa,#f8fbff); }
   .topbar-popover { top:calc(100% + 20px); right:-1px; }
   .sidebar-nav { margin-top:17px; }
 }
+
+/* OREVON_FORECAST_SCOPED_STYLES_V1 */
+/* Scope every new style to the dashboard forecast panel. */
+.orevon-forecast-panel {
+  overflow: hidden;
+}
+.orevon-forecast-panel .panel-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.orevon-forecast-panel .panel-top .btn {
+  white-space: nowrap;
+}
+.orevon-forecast-content {
+  padding: 0 24px 24px;
+}
+.orevon-forecast-intro {
+  margin: 0 0 20px;
+  max-width: 850px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #77839a;
+}
+.orevon-forecast-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.orevon-forecast-kpi {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 114px;
+  padding: 19px 20px;
+  border: 1px solid #e1ebf3;
+  border-radius: 16px;
+  background: #fbfdff;
+  box-shadow: 0 5px 16px rgba(20, 39, 65, 0.035);
+}
+.orevon-forecast-kpi strong {
+  color: #12243a;
+  font-size: 29px;
+  line-height: 1.1;
+  letter-spacing: -0.8px;
+  font-weight: 800;
+}
+.orevon-forecast-kpi-label {
+  color: #71829a;
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 600;
+}
+.orevon-forecast-scroller {
+  border: 1px solid #e5ecf4;
+  border-radius: 14px;
+  overflow-x: auto;
+}
+.orevon-forecast-table {
+  width: 100%;
+  min-width: 770px;
+  border-collapse: collapse;
+}
+.orevon-forecast-table th {
+  background: #f7faff;
+  color: #8494aa;
+  padding: 15px 16px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.orevon-forecast-table td {
+  padding: 16px;
+  vertical-align: middle;
+  color: #63758d;
+}
+.orevon-forecast-table td:first-child {
+  min-width: 210px;
+  white-space: normal;
+}
+.orevon-forecast-table td strong {
+  color: #12243a;
+  font-weight: 750;
+}
+.orevon-forecast-sku {
+  margin-top: 5px;
+  font-size: 11px;
+}
+.orevon-forecast-note {
+  margin: 18px 0 0;
+  color: #77839a;
+  font-size: 12px;
+  line-height: 1.7;
+}
+@media (max-width: 1050px) {
+  .orevon-forecast-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .orevon-forecast-content { padding: 0 16px 20px; }
+  .orevon-forecast-kpis { gap: 10px; margin-bottom: 18px; }
+  .orevon-forecast-kpi { min-height: 96px; padding: 14px 13px; }
+  .orevon-forecast-kpi strong { font-size: 24px; }
+  .orevon-forecast-kpi-label { font-size: 11px; }
+  .orevon-forecast-panel .panel-top .btn { max-width: 100%; }
+}
