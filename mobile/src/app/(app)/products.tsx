@@ -39,6 +39,7 @@ type Product = {
   category_name?: string;
   stock_status?: string;
   image_url?: string | null;
+  is_active?: boolean;
 };
 type Payload = Product[] | { results?: Product[]; next?: string | null };
 type Choice = { id: number; name: string };
@@ -88,13 +89,18 @@ const barcodeTypes: ('qr' | 'code128' | 'code39' | 'ean13' | 'ean8' | 'upc_a' | 
 export default function ProductsScreen() {
   const { user, apiGet, apiPost, apiPatch, apiDelete, apiUpload } = useAuth();
   const canManage = user?.role === 'admin' || user?.role === 'manager';
-  const { data, busy, error, reload } = useRemote<Payload>('/products/');
+  const [catalogView, setCatalogView] = useState<'active' | 'archived'>('active');
+  const canViewArchived = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'staff';
+  const productsPath = canViewArchived && catalogView === 'archived'
+    ? '/products/?include_inactive=true' : '/products/';
+  const { data, busy, error, reload } = useRemote<Payload>(productsPath);
   const { rows: products, moreAvailable: productsNext, loadingMore: productsMoreBusy, moreError: productsMoreError, loadMore: loadProductPage } =
     useOrevonPages(data, '/products/', query => apiGet<Payload>(query));
   const [catalogSearch, setCatalogSearch] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
   const [catalogLimit, setCatalogLimit] = useState(8);
   const filtered = products.filter(product => {
+    if (catalogView === 'archived' ? product.is_active !== false : product.is_active === false) return false;
     const matches = `${product.name} ${product.sku || ''} ${product.category_name || ''}`
       .toLowerCase().includes(catalogSearch.trim().toLowerCase());
     const stock = product.stock;
@@ -349,8 +355,9 @@ export default function ProductsScreen() {
         title="Your products"
         description="Find, organize and manage every item in your catalog."
         stats={[
-          { label: 'Loaded', value: products.length },
-          ...(user?.role === 'user' ? [] : [
+          { label: catalogView === 'archived' ? 'Archived loaded' : 'Loaded',
+            value: products.filter(p => catalogView === 'archived' ? p.is_active === false : p.is_active !== false).length },
+          ...(user?.role === 'user' || catalogView === 'archived' ? [] : [
             { label: 'Low stock', value: products.filter(p => typeof p.stock === 'number' && p.stock > 0 && p.stock <= (p.low_stock_threshold ?? 0)).length },
             { label: 'Out of stock', value: products.filter(p => p.stock === 0).length },
           ]),
@@ -418,10 +425,21 @@ export default function ProductsScreen() {
         )}
       </View>
 
+      {canViewArchived && (
+        <ListFilters
+          value={catalogView}
+          onChange={value => {
+            setCatalogView(value === 'archived' ? 'archived' : 'active');
+            setStockFilter('all');
+            setCatalogLimit(8);
+          }}
+          items={[{ value: 'active', label: 'Active products' }, { value: 'archived', label: 'Archived products' }]}
+        />
+      )}
       <LoadNotice loading={busy && !data} error={error} onRetry={reload} empty={!!data && !products.length} />
       {!!products.length && !error && (
         <>
-          <SectionTitle>Product catalog</SectionTitle>
+          <SectionTitle>{catalogView === 'archived' ? 'Archived products' : 'Product catalog'}</SectionTitle>
           <TextInput
             accessibilityLabel="Search catalog"
             value={catalogSearch}
@@ -430,11 +448,13 @@ export default function ProductsScreen() {
             placeholder="Filter visible products by name or SKU"
             placeholderTextColor="#94A3B8"
           />
-          {user?.role !== 'user' && <ListFilters value={stockFilter} onChange={value => { setStockFilter(value); setCatalogLimit(8); }} items={[
+          {user?.role !== 'user' && catalogView === 'active' && <ListFilters value={stockFilter} onChange={value => { setStockFilter(value); setCatalogLimit(8); }} items={[
             { value: 'all', label: 'All' }, { value: 'low', label: 'Low stock' }, { value: 'out', label: 'Out of stock' }, { value: 'healthy', label: 'In stock' },
           ]} />}
-          <LoadedHint text={`${Math.min(catalogLimit, filtered.length)} of ${filtered.length} matching loaded products${productsNext ? ' · More API pages available' : ''}. Filter searches loaded records; SKU lookup above searches the server.`} />
-          {!filtered.length && <Text style={styles.helper}>No matching products in the loaded catalog.</Text>}
+          <LoadedHint text={`${Math.min(catalogLimit, filtered.length)} of ${filtered.length} matching loaded ${catalogView === 'archived' ? 'archived ' : ''}products${productsNext ? ' · More API pages available' : ''}. Filter searches loaded records; SKU lookup above searches the server.`} />
+          {!filtered.length && <Text style={styles.helper}>{catalogView === 'archived'
+            ? (productsNext ? 'No archived products in loaded pages. Load the next product page to continue.' : 'No archived products found.')
+            : 'No matching products in the loaded catalog.'}</Text>}
           {filtered.slice(0, catalogLimit).map(product => (
             <View key={product.id} style={styles.productCard}>
               <View style={styles.productTop}>
@@ -451,12 +471,12 @@ export default function ProductsScreen() {
                   {user?.role !== 'user' && typeof product.stock === 'number' && (
                     <View style={styles.productStockLine}>
                       <Text style={[styles.stock, product.stock === 0 && styles.emptyStock]}>{product.stock} units</Text>
-                      <StatusChip label={product.stock === 0 ? 'Out of stock' : product.stock <= (product.low_stock_threshold ?? 0) ? 'Low stock' : 'In stock'} tone={product.stock === 0 ? 'danger' : product.stock <= (product.low_stock_threshold ?? 0) ? 'warning' : 'success'} />
+                      <StatusChip label={catalogView === 'archived' ? 'Archived' : product.stock === 0 ? 'Out of stock' : product.stock <= (product.low_stock_threshold ?? 0) ? 'Low stock' : 'In stock'} tone={catalogView === 'archived' ? 'warning' : product.stock === 0 ? 'danger' : product.stock <= (product.low_stock_threshold ?? 0) ? 'warning' : 'success'} />
                     </View>
                   )}
                 </View>
               </View>
-              {canManage && (
+              {canManage && catalogView === 'active' && (
                 <View style={styles.productActions}>
                   <Pressable accessibilityRole="button" style={styles.editButton} onPress={() => openProductForm(product)}>
                     <Text style={styles.actionText}>Edit / Photo</Text>
@@ -477,7 +497,7 @@ export default function ProductsScreen() {
       <Modal visible={formOpen} animationType="slide" onRequestClose={() => { if (!formBusy) setFormOpen(false); }}>
         <SafeAreaView style={styles.formScreen}>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.formContent}>
-            <Text style={styles.cameraTitle}>{editing ? 'Edit product' : 'Add product'}</Text>
+            <Text style={styles.formTitle}>{editing ? 'Edit product' : 'Add product'}</Text>
             <Text style={styles.formHelp}>Only Admin and Manager can change catalog details. Stock is managed in Inventory.</Text>
             <FormField label="Name" value={form.name} onChangeText={v => changeForm('name', v)} />
             <FormField label="SKU" value={form.sku} onChangeText={v => changeForm('sku', v.toUpperCase())} />
@@ -588,6 +608,7 @@ const styles = StyleSheet.create({
   resultHint: { color: '#64748B', fontSize: 11, marginTop: 10, lineHeight: 16 },
   searched: { color: '#64748B', fontSize: 11, marginTop: 12 },
   cameraScreen: { flex: 1, backgroundColor: '#071B17', padding: 18 },
+  formTitle: { color: '#12243A', fontSize: 22, fontWeight: '800', marginTop: 10 },
   cameraTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', marginTop: 10 },
   cameraHelp: { color: '#D1FAE5', fontSize: 13, marginTop: 10, marginBottom: 18 },
   camera: { flex: 1, minHeight: 260, borderRadius: 16, overflow: 'hidden' },
