@@ -12,12 +12,21 @@ Orevon is a deployed inventory and order management system with a React web appl
 | Backend REST API | https://smartstock-rjxl.onrender.com/api/ |
 | API health check | https://smartstock-rjxl.onrender.com/api/health/ |
 | Swagger API documentation | https://smartstock-rjxl.onrender.com/api/docs/ |
-| Android APK build | https://expo.dev/accounts/danishky/projects/mobile/builds/c1ddde96-c9ea-48d9-a0fe-21700a9ece18 |
+| Android APK build (latest) | https://expo.dev/accounts/danishky/projects/mobile/builds/0ff1e41b-8046-4d2d-8711-a726b4c5a333 |
 | Source repository | https://github.com/danish-ky/smartstock |
 
 The Android APK is an internal assessment build, not a Google Play Store release. The Expo build page provides installation access.
 
 The web and Android applications use the same hosted API and PostgreSQL database. Local development instructions are retained below.
+
+### Assessment reviewer quick start
+
+1. Open the [live Orevon web app](https://orevon-web.vercel.app/login) and sign in using the **temporary reviewer credentials provided privately with the submission**. No credentials are stored in this repository.
+2. Use **Dashboard** to review stock and sales metrics, **Products** to explore the catalog, **Inventory** to inspect adjustments and their audit trail, **Orders** to view order workflows, and **Reports** to explore analytics.
+3. To review the mobile application, open the **latest Android APK build** linked above on an Android device and follow Expo's installation instructions. This is an internal assessment APK, not a Play Store release.
+4. Inspect the [hosted Swagger UI](https://smartstock-rjxl.onrender.com/api/docs/), [ER diagram](ER_DIAGRAM.md), and [QA verification report](QA_STATUS.md) for the API, data model, and tested scope.
+
+**Data safety:** The deployed Web and Android clients share the same hosted database. Test actions that create orders or adjust stock change live assessment data; use disposable test records if exercising write workflows.
 
 ## Stack
 
@@ -100,8 +109,8 @@ Vite builds static assets into `frontend/dist/`. Set `VITE_API_URL` to your depl
 | Module | Features |
 |---|---|
 | Login | Username/password login, JWT auto-refresh, refresh blacklist on logout, authenticated account info |
-| Dashboard | Active products, stock quantities, order totals, sales value, low-stock alerts, sales chart, recent orders |
-| Products | Create/edit/archive products, SKU validation, category/supplier assignment, search, filters, CSV export |
+| Dashboard | Active products, stock quantities, order totals, sales value, low-stock alerts, sales chart, recent orders, read-only forecast and restock suggestions |
+| Products | Create/edit/archive products, SKU validation, category/supplier assignment, search, filters, CSV export, and separate Active / Archived catalog views (archived view is read-only) |
 | Categories | Add/edit/delete categories (protected if referenced) |
 | Inventory | Stock-in, stock-out, insufficient-stock rejection, full audit log, stock alerts, movement CSV export |
 | Customers | Add/edit/delete customer records, contact information, search, CSV |
@@ -109,6 +118,10 @@ Vite builds static assets into `frontend/dist/`. Set `VITE_API_URL` to your depl
 | Orders | Customer order with multiple products, duplicate-line validation, atomic stock deduction, unit-price snapshots, fulfillment, cancel/restock, CSV |
 | Reports | Sales summary, average sale, valuation at cost, top products, category stock, date range, bar/donut charts, CSV |
 | Team | Admin-only creation/edit/deactivation/deletion of users, role assignment, password validation |
+
+**Archived catalog visibility:** Admin, Manager, and Staff can switch between active and archived products in the Web and Android Products screens. Archived records are view-only in this interface (no restore or permanent-delete action). Ordinary `user` accounts are limited to active products.
+
+**Forecast disclaimer:** Forecast & Restock Alerts uses sales history for **read-only estimates** and suggested reorder quantities. It does not automatically place purchase orders.
 
 **Critical stock invariant:** `Product.stock` cannot be changed from product CRUD. Only `POST /api/inventory/adjust/` and the order service change quantities, inside database transactions, while creating `StockMovement` audit records. Deleting a product archives it; it must have zero remaining stock. Orders with status `placed` or `fulfilled` count toward total sales; `cancelled` orders do not.
 
@@ -140,6 +153,8 @@ All authorization is enforced **in the API**, not only by hiding web navigation 
 | POST | `/api/auth/logout/` | Blacklist supplied refresh token |
 | GET | `/api/auth/me/` | Current user and role |
 | GET | `/api/dashboard/` | Dashboard metrics |
+| GET | `/api/inventory/forecast/?limit=12` | Read-only inventory forecast and reorder suggestions |
+| GET | `/api/products/?include_inactive=true` | Active and archived products for authorized operational roles |
 | GET/POST | `/api/products/` | List/create products |
 | GET/PATCH/DELETE | `/api/products/{id}/` | View/edit/archive product |
 | GET/POST | `/api/categories/` | List/create categories |
@@ -210,6 +225,10 @@ The order records the selling price, creates `OrderItem` and `StockMovement` rec
 
 See [ER_DIAGRAM.md](ER_DIAGRAM.md) for the complete Mermaid ER diagram and relationship description.
 
+## Android application
+
+The mobile client is an **Expo React Native** application. Its essential inventory and order workflows use the same hosted Django REST API as the Web app. The current internal Android APK is linked in the **Live deployment** table. For local mobile setup and build instructions, see [mobile/README.md](mobile/README.md).
+
 ## 7. Deployment guidance
 
 1. Create a managed PostgreSQL database, then set `DATABASE_URL` on your Python host.
@@ -238,7 +257,7 @@ npm run typecheck
 npm run build
 ```
 
-**Current verification (November 15, 2026):** The hosted web application was manually tested for login, product creation, inventory adjustments, customer creation, and sales order stock deduction. The Android APK was built successfully using EAS, installed on a physical Android device, and authenticated successfully. An Android stock-in adjustment from 3 to 4 units was confirmed in the Android audit trail and hosted website. Mobile TypeScript and Expo dependency checks passed. These are verified manual results, not a claim that every automated test or application feature has passed. See QA_STATUS.md for additional test documentation.
+**Current verification (November 16, 2026):** The hosted Web app was manually tested for login, product creation, inventory adjustments, customer creation, and sales order stock deduction. The updated Android APK was built successfully with EAS and installed on a physical Android device; its Add/Edit Product headings and Archived Products selector were visually checked. An earlier Android stock-in adjustment from 3 to 4 units was confirmed in the Android audit trail and hosted website. The updated Web Products archived-view selector and redesigned Forecast & Restock Alerts layout were visually checked. The local forecast refresh request returned HTTP 200. Web TypeScript checks and production build, plus mobile TypeScript and Expo dependency checks, passed. **Retrieval of a real archived product in the new view has not yet been functionally verified.** These are specific build/manual checks, not a claim that all features or automated tests passed. See [QA_STATUS.md](QA_STATUS.md) for the test record.
 
 ## 9. Suggested assessment demo
 
