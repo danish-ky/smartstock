@@ -1,9 +1,13 @@
+
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../context/AuthContext';
+import OrevonUpdatePrompt from '../components/updates/OrevonUpdatePrompt';
 
 export default function RootLayout() {
   return (
     <AuthProvider>
+      <OrevonUpdatePrompt />
+
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="(app)" />
