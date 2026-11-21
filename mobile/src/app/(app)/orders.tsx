@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { InfoCard, LoadNotice, Page, SectionTitle } from '../../components/MobileUI';
+import { EmeraldGradient } from '../../components/OrevonPolish';
 import { ListFilters, ListMore, ListSearch, LoadedHint, StatusChip } from '../../components/OrevonListUI';
 import { useOrevonPages } from '../../lib/useOrevonPages';
 import { useAuth } from '../../context/AuthContext';
@@ -561,6 +562,7 @@ export default function OrdersScreen() {
     >
       {canOperate && (
         <Pressable accessibilityRole="button" style={styles.primaryButton} onPress={() => { void openCreate(); }}>
+          <EmeraldGradient />
           <Text style={styles.primaryText}>+ Create Order</Text>
         </Pressable>
       )}
@@ -673,8 +675,9 @@ export default function OrdersScreen() {
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.brandEyebrow}>OREVON / SALES</Text>
+                <Text style={styles.modalBrandEyebrow}>OREVON / SALES</Text>
                 <Text style={styles.modalTitle}>New sales order</Text>
+                <Text style={styles.modalTagline}>Create a sale with confidence</Text>
               </View>
               <Pressable disabled={saving} onPress={() => setCreateOpen(false)} accessibilityRole="button"><Text style={styles.closeText}>Close</Text></Pressable>
             </View>
@@ -705,6 +708,7 @@ export default function OrdersScreen() {
                   accessibilityLabel="Search products"
                   placeholder="Search products by name or SKU"
                   value={productSearch}
+                  placeholderTextColor="#8498A5"
                   onChangeText={setProductSearch}
                   autoCorrect={false}
                 />
@@ -741,6 +745,7 @@ export default function OrdersScreen() {
                   onChangeText={setNotes}
                   maxLength={2000}
                   placeholder="Additional order notes"
+                  placeholderTextColor="#8498A5"
                   editable={!saving}
                 />
                 <View style={styles.summary}>
@@ -751,6 +756,7 @@ export default function OrdersScreen() {
                 </View>
                 {!!formError && <Text style={styles.error}>{formError}</Text>}
                 <Pressable accessibilityRole="button" disabled={saving} onPress={confirmCreate} style={[styles.primaryButton, saving && styles.disabled]}>
+                  <EmeraldGradient />
                   {saving ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>Review & Place Order</Text>}
                 </Pressable>
               </>
@@ -782,6 +788,7 @@ export default function OrdersScreen() {
                 <Pressable accessibilityRole="button" disabled={invoiceBusy || detailBusy || acting || !!detailError}
                   onPress={() => { void openInvoice(selected); }}
                   style={[styles.primaryButton, (invoiceBusy || detailBusy || acting || !!detailError) && styles.disabled]}>
+                  <EmeraldGradient />
                   {invoiceBusy ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>Open / Share Invoice PDF</Text>}
                 </Pressable>
                 <Text style={styles.hint}>The invoice is a demo document, not a GST tax invoice. Customers may view only their own invoices.</Text>
@@ -822,6 +829,7 @@ export default function OrdersScreen() {
                           disabled={checkoutBusy || checkoutVerifying || acting || detailBusy || requiresPaymentRefresh}
                           onPress={() => { void startRazorpayTestCheckout(); }}
                           style={[styles.primaryButton, (checkoutBusy || checkoutVerifying || acting || detailBusy || requiresPaymentRefresh) && styles.disabled]}>
+                  <EmeraldGradient />
                           {checkoutBusy ? <ActivityIndicator color="white"/> : <Text style={styles.primaryText}>Pay {amount(outstandingPaise / 100)} · Razorpay TEST</Text>}
                         </Pressable>
                         <Text style={styles.hint}>Payment is recorded only after Django verifies a captured transaction. Closing checkout does not cancel the gateway order.</Text>
@@ -872,6 +880,7 @@ export default function OrdersScreen() {
                           disabled={acting || detailBusy || requiresPaymentRefresh}
                           onPress={confirmManualPayment}
                           style={[styles.primaryButton, (acting || detailBusy || requiresPaymentRefresh) && styles.disabled]}>
+                  <EmeraldGradient />
                           {acting ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>Review & Record Payment</Text>}
                         </Pressable>
                       </View>
@@ -924,8 +933,9 @@ const styles = StyleSheet.create({
   orderArrow: { color: '#0E8F72', fontSize: 19, fontWeight: '800', marginLeft: 4 },
   listEmpty: { color: '#687A8F', fontSize: 13, marginBottom: 15 },
   brandEyebrow: { color: '#0E8877', fontSize: 10, letterSpacing: 1.6, fontWeight: '900', marginBottom: 5 },
-  customerSelect: { backgroundColor: 'white', borderWidth: 1.5, borderColor: '#CDD9E5', borderRadius: 15, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18, minHeight: 72 },
-  customerSelectChosen: { borderColor: '#0D967F', backgroundColor: '#F3FDF9' },
+  modalBrandEyebrow: { color: '#84E7C4', fontSize: 10, letterSpacing: 1.6, fontWeight: '900', marginBottom: 7 },
+  customerSelect: { backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#D6E9E3', borderRadius: 17, padding: 17, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18, minHeight: 79, elevation: 2 },
+  customerSelectChosen: { borderColor: '#0AA586', backgroundColor: '#E9FBF3' },
   selectLabel: { fontSize: 10, fontWeight: '800', color: '#65839A', letterSpacing: 0.8, marginBottom: 6 },
   selectValue: { fontSize: 16, fontWeight: '800', color: '#10233D' },
   selectPlaceholder: { color: '#66778B', fontWeight: '600' },
@@ -948,29 +958,30 @@ const styles = StyleSheet.create({
   loadMoreButton: { padding: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#E7F3EF', marginTop: 4 },
   loadMoreText: { color: '#047857', fontWeight: '800' },
   emptyMessage: { padding: 18, color: '#64748B', textAlign: 'center', lineHeight: 21 },
-  primaryButton: { backgroundColor: '#047857', paddingVertical: 15, borderRadius: 13, alignItems: 'center', marginBottom: 12 },
+  primaryButton: { overflow: 'hidden', backgroundColor: '#0A9677', paddingVertical: 16, paddingHorizontal: 12, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 12, minHeight: 53, elevation: 2 },
   primaryText: { color: 'white', fontWeight: '800', fontSize: 15 },
   hint: { color: '#64748B', lineHeight: 19, fontSize: 12, marginBottom: 14, marginTop: 4 },
-  modalRoot: { flex: 1, backgroundColor: '#F1F5F9' },
-  modalContent: { paddingHorizontal: 18, paddingTop: 48, paddingBottom: 42 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 14 },
-  modalTitle: { fontWeight: '800', fontSize: 24, color: '#0F172A', flexShrink: 1 },
-  closeText: { color: '#047857', fontWeight: '800', fontSize: 15, padding: 8 },
+  modalRoot: { flex: 1, backgroundColor: '#F3F9F7' },
+  modalContent: { paddingHorizontal: 18, paddingTop: 38, paddingBottom: 52 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, backgroundColor: '#123247', borderRadius: 20, paddingHorizontal: 17, paddingVertical: 20, marginBottom: 15 },
+  modalTitle: { fontWeight: '900', fontSize: 24, color: '#FFFFFF', flexShrink: 1 },
+  modalTagline: { color: '#C3DFD9', fontSize: 12, marginTop: 7 },
+  closeText: { color: '#0A8068', fontWeight: '800', fontSize: 14, padding: 9, backgroundColor: '#DFF7ED', borderRadius: 10, overflow: 'hidden' },
   error: { color: '#B91C1C', paddingVertical: 12, fontWeight: '600' },
   warning: { color: '#92400E', backgroundColor: '#FFFBEB', padding: 12, borderRadius: 10, overflow: 'hidden' },
-  input: { borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: 'white', padding: 12, borderRadius: 10, fontSize: 14, color: '#0F172A', marginBottom: 8 },
+  input: { borderWidth: 1, borderColor: '#D5E6E1', backgroundColor: '#FFFFFF', paddingHorizontal: 15, paddingVertical: 14, borderRadius: 14, fontSize: 15, color: '#173246', marginBottom: 9, minHeight: 52 },
   notes: { minHeight: 70 },
   choice: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, backgroundColor: 'white', padding: 12, marginBottom: 7 },
   choiceSelected: { borderColor: '#047857', backgroundColor: '#ECFDF5' },
   choiceTitle: { color: '#0F172A', fontSize: 14, fontWeight: '700' },
   choiceMeta: { color: '#64748B', fontSize: 12, marginTop: 3, lineHeight: 17 },
-  productRow: { backgroundColor: 'white', borderRadius: 11, padding: 12, marginBottom: 7, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  productRow: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DFEBE6', borderRadius: 15, padding: 13, marginBottom: 9, flexDirection: 'row', alignItems: 'center', gap: 9 },
   qtyControls: { flexDirection: 'row', gap: 9, alignItems: 'center' },
-  qtyButton: { borderRadius: 9, backgroundColor: '#E2E8F0', height: 35, width: 35, alignItems: 'center', justifyContent: 'center' },
-  qtyButtonText: { fontSize: 20, color: '#0F172A', fontWeight: '800' },
+  qtyButton: { borderRadius: 11, backgroundColor: '#DDF4EB', height: 38, width: 38, alignItems: 'center', justifyContent: 'center' },
+  qtyButtonText: { fontSize: 21, color: '#087762', fontWeight: '900' },
   qtyText: { fontWeight: '800', fontSize: 15, color: '#0F172A', minWidth: 16, textAlign: 'center' },
   disabled: { opacity: 0.4 },
-  summary: { backgroundColor: 'white', borderRadius: 13, padding: 16, marginTop: 10, marginBottom: 11 },
+  summary: { backgroundColor: '#E9F9F1', borderRadius: 17, padding: 17, marginTop: 13, marginBottom: 14, borderWidth: 1, borderColor: '#C6ECDC' },
   summaryTitle: { fontWeight: '800', color: '#0F172A', fontSize: 15, marginBottom: 5 },
   summaryText: { color: '#475569', fontSize: 13, lineHeight: 20 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 17, marginBottom: 10 },

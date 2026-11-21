@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Page } from './MobileUI';
+import { EmeraldGradient } from './OrevonPolish';
 import { useAuth } from '../context/AuthContext';
 import { listItems } from '../lib/api';
 
@@ -53,12 +54,16 @@ function FormField({ label, value, onChange, multiline = false, keyboardType = '
   keyboardType?: 'default' | 'email-address' | 'phone-pad';
   maxLength?: number;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
-        style={[styles.input, multiline && styles.multiline]}
+        style={[styles.input, multiline && styles.multiline, focused && styles.inputFocused]}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        selectionColor="#0AA586"
         value={value}
         onChangeText={onChange}
         placeholder={label}
@@ -215,6 +220,7 @@ export default function DirectoryManager({ kind }: { kind: Kind }) {
     <Page title={config.plural} subtitle={config.subtitle} refreshing={loading} onRefresh={() => { void load(); }}>
       {canWrite ? (
         <Pressable accessibilityRole="button" style={styles.primaryButton} onPress={() => openEditor()}>
+          <EmeraldGradient />
           <Text style={styles.primaryText}>+ Add {config.single}</Text>
         </Pressable>
       ) : (
@@ -300,12 +306,18 @@ export default function DirectoryManager({ kind }: { kind: Kind }) {
       <Modal visible={formOpen} animationType="slide" onRequestClose={() => { if (!saving) setFormOpen(false); }}>
         <SafeAreaView edges={['top', 'bottom']} style={styles.modalRoot}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>{editing ? 'Edit' : 'Add'} {config.single}</Text>
-            <Pressable accessibilityRole="button" disabled={saving} onPress={() => setFormOpen(false)}>
+            <View style={styles.modalHeaderCopy}>
+              <Text style={styles.modalEyebrow}>OREVON / {config.plural.toUpperCase()}</Text>
+              <Text style={styles.modalTitle}>{editing ? 'Edit' : 'Add'} {config.single}</Text>
+              <Text style={styles.modalSubtitle}>{editing ? 'Update the existing details below.' : `Add a new ${config.single} to your workspace.`}</Text>
+            </View>
+            <Pressable accessibilityRole="button" disabled={saving} onPress={() => setFormOpen(false)} style={styles.closePill}>
               <Text style={styles.closeText}>Close</Text>
             </Pressable>
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>
+            <Text style={styles.sectionEyebrow}>DETAILS</Text>
+            <View style={styles.modalFormCard}>
             <FormField label="Name *" value={form.name} onChange={value => change('name', value)} maxLength={kind === 'categories' ? 120 : 160} />
             {kind === 'categories' ? (
               <FormField label="Description" value={form.description} onChange={value => change('description', value)} multiline maxLength={2000} />
@@ -318,8 +330,10 @@ export default function DirectoryManager({ kind }: { kind: Kind }) {
             )}
             {!!formError && <Text accessibilityRole="alert" style={styles.errorText}>{formError}</Text>}
             <Pressable accessibilityRole="button" onPress={() => { void save(); }} disabled={saving} style={[styles.primaryButton, saving && styles.disabled]}>
+              <EmeraldGradient />
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryText}>{editing ? 'Save changes' : `Create ${config.single}`}</Text>}
             </Pressable>
+            </View>
           </ScrollView>
         </SafeAreaView>
       </Modal>
@@ -328,7 +342,7 @@ export default function DirectoryManager({ kind }: { kind: Kind }) {
 }
 
 const styles = StyleSheet.create({
-  primaryButton: { backgroundColor: '#047857', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginBottom: 13 },
+  primaryButton: { overflow: 'hidden', backgroundColor: '#098D73', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 13, minHeight: 53, justifyContent: 'center', elevation: 2, shadowColor: '#0A846E', shadowOpacity: 0.17, shadowRadius: 8, shadowOffset: {width: 0, height: 3} },
   primaryText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   readOnly: { backgroundColor: '#DBEAFE', borderRadius: 11, padding: 12, marginBottom: 12 },
   readOnlyText: { color: '#1E40AF', fontWeight: '700', fontSize: 12 },
@@ -355,13 +369,20 @@ const styles = StyleSheet.create({
   retryText: { color: '#FFFFFF', fontWeight: '700' },
   loading: { marginVertical: 24 },
   empty: { color: '#64748B', textAlign: 'center', padding: 20 },
-  modalRoot: { flex: 1, backgroundColor: '#F8FAFC' },
-  modalHeader: { paddingHorizontal: 20, paddingVertical: 18, borderBottomWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  modalTitle: { color: '#0F172A', fontSize: 21, fontWeight: '800' },
-  closeText: { color: '#047857', fontWeight: '700' },
-  modalContent: { padding: 20, paddingBottom: 45 },
+  modalRoot: { flex: 1, backgroundColor: '#F3F9F7' },
+  modalHeader: { backgroundColor: '#123247', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 24, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  modalHeaderCopy: { flex: 1 },
+  modalEyebrow: { color: '#8AE8C9', fontSize: 10, letterSpacing: 1.7, fontWeight: '900', marginBottom: 9 },
+  modalTitle: { color: '#FFFFFF', fontSize: 24, fontWeight: '900', letterSpacing: -0.4, textTransform: 'capitalize' },
+  modalSubtitle: { color: '#C5E0DC', fontSize: 12, marginTop: 8, lineHeight: 18 },
+  closePill: { paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#DFF8EE', borderRadius: 10 },
+  closeText: { color: '#087762', fontSize: 12, fontWeight: '800' },
+  modalContent: { paddingHorizontal: 18, paddingTop: 20, paddingBottom: 54 },
+  sectionEyebrow: { color: '#0A8B70', fontSize: 10, fontWeight: '900', letterSpacing: 1.4, marginBottom: 10, marginLeft: 4 },
+  modalFormCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 17, paddingBottom: 5, borderWidth: 1, borderColor: '#DFEEE9', shadowColor: '#143D33', shadowOpacity: 0.04, shadowRadius: 12, elevation: 2 },
   field: { marginBottom: 17 },
-  fieldLabel: { color: '#334155', fontSize: 13, fontWeight: '700', marginBottom: 7 },
-  input: { borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF', color: '#0F172A', borderRadius: 10, paddingHorizontal: 13, paddingVertical: 12, fontSize: 14 },
-  multiline: { minHeight: 95, textAlignVertical: 'top' },
+  fieldLabel: { color: '#244051', fontSize: 12, fontWeight: '800', marginBottom: 8 },
+  input: { borderWidth: 1, borderColor: '#D5E5E3', backgroundColor: '#F9FCFB', color: '#152F41', borderRadius: 13, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, minHeight: 51 },
+  inputFocused: { backgroundColor: '#FFFFFF', borderColor: '#0AA586', borderWidth: 1.5 },
+  multiline: { minHeight: 104, textAlignVertical: 'top' },
 });

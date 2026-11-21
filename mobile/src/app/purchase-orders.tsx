@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LoadNotice, Page, SectionTitle } from '../components/MobileUI';
 import { OrevonScreenHero } from '../components/OrevonScreenHero';
+import { EmeraldGradient } from '../components/OrevonPolish';
 import { ListFilters, ListMore, ListSearch, LoadedHint, StatusChip } from '../components/OrevonListUI';
 import { useOrevonPages } from '../lib/useOrevonPages';
 import { useAuth } from '../context/AuthContext';
@@ -144,7 +145,7 @@ function Content() {
       ]}
     />
     <LoadNotice loading={busy && !poData} error={error} onRetry={reload} empty={false}/>
-    {manager && <Pressable style={styles.primary} onPress={startCreate}><Text style={styles.primaryText}>＋ New purchase order</Text></Pressable>}
+    {manager && <Pressable style={styles.primary} onPress={startCreate}><EmeraldGradient /><Text style={styles.primaryText}>＋ New purchase order</Text></Pressable>}
     <SectionTitle>Supplier orders</SectionTitle>
     {!!orders.length && <>
       <ListSearch label="Search loaded purchase orders" placeholder="PO number or supplier" value={poSearch} onChangeText={value => { setPoSearch(value); setPoLimit(10); }} />
@@ -177,8 +178,8 @@ function Content() {
           <Text>Ordered {line.quantity} · Received {line.received_quantity} · Remaining {line.remaining_quantity}</Text>
           <Text style={styles.secondary}>Unit cost: {price(line.unit_cost)}</Text>
         </View>)}
-        {manager && selected.status === 'draft' && <Pressable style={styles.primary} disabled={saving} onPress={() => confirmAct('place')}><Text style={styles.primaryText}>Place purchase order</Text></Pressable>}
-        {['ordered','partial'].includes(selected.status) && <Pressable style={styles.primary} disabled={saving} onPress={beginReceive}><Text style={styles.primaryText}>Receive delivery</Text></Pressable>}
+        {manager && selected.status === 'draft' && <Pressable style={styles.primary} disabled={saving} onPress={() => confirmAct('place')}><EmeraldGradient /><Text style={styles.primaryText}>Place purchase order</Text></Pressable>}
+        {['ordered','partial'].includes(selected.status) && <Pressable style={styles.primary} disabled={saving} onPress={beginReceive}><EmeraldGradient /><Text style={styles.primaryText}>Receive delivery</Text></Pressable>}
         {manager && ['draft','ordered'].includes(selected.status) && <Pressable style={styles.danger} disabled={saving} onPress={() => confirmAct('cancel')}><Text style={styles.primaryText}>Cancel purchase order</Text></Pressable>}
       </View>
       <SectionTitle>Receipt history ({selected.receipts?.length ?? 0})</SectionTitle>
@@ -202,7 +203,12 @@ function Content() {
   }
 }} animationType="slide">
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modal}>
-        <Text style={styles.heading}>New purchase order</Text><Text style={styles.secondary}>Draft first. No stock change until delivery.</Text>
+        <View style={styles.modalBanner}>
+          <Text style={styles.modalEyebrow}>OREVON / PROCUREMENT</Text>
+          <Text style={styles.heading}>New purchase order</Text>
+          <Text style={styles.modalBannerSubtitle}>Draft first. No stock change until delivery.</Text>
+        </View>
+        <Text style={styles.sectionEyebrow}>SUPPLIER & ITEMS</Text>
         <Text style={styles.label}>Choose supplier</Text>
         {suppliers.map(s => <Pressable key={s.id} style={[styles.option, supplier === s.id && styles.active]} onPress={() => {setSupplier(s.id);setLines([]);}}><Text>{s.name}{supplier === s.id ? ' ✓' : ''}</Text></Pressable>)}
         {supplier !== null && <><Text style={styles.label}>Tap to add products ({lines.length} selected)</Text>
@@ -211,7 +217,7 @@ function Content() {
           <Text style={styles.label}>Notes</Text><TextInput style={styles.input} multiline maxLength={2000} value={notes} onChangeText={setNotes}/>
         </>}
         {!!formError && <Text style={styles.error}>{formError}</Text>}
-        <Pressable style={styles.primary} disabled={saving} onPress={() => void create()}>{saving ? <ActivityIndicator color="#fff"/> : <Text style={styles.primaryText}>Create draft</Text>}</Pressable>
+        <Pressable style={styles.primary} disabled={saving} onPress={() => void create()}><EmeraldGradient />{saving ? <ActivityIndicator color="#fff"/> : <Text style={styles.primaryText}>Create draft</Text>}</Pressable>
         <Pressable style={styles.secondaryButton} disabled={saving} onPress={() => setCreating(false)}><Text>Close</Text></Pressable>
       </ScrollView>
     </Modal>
@@ -221,14 +227,14 @@ function Content() {
   }
 }} animationType="slide">
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modal}>
-        <Text style={styles.heading}>Receive {selected?.number}</Text><Text style={styles.secondary}>Enter the units physically received. Leave 0 for undelivered items.</Text>
+        <Text style={styles.receiptHeading}>Receive {selected?.number}</Text><Text style={styles.secondary}>Enter the units physically received. Leave 0 for undelivered items.</Text>
         {selected?.items.filter(i => i.remaining_quantity > 0).map(line => <View key={line.id} style={styles.line}>
           <Text style={styles.title}>{line.product_name}</Text><Text style={styles.secondary}>{line.remaining_quantity} units remaining</Text>
           <TextInput style={styles.input} keyboardType="numeric" value={received[line.id] ?? '0'} onChangeText={text => setReceived(old => ({...old,[line.id]:text}))}/>
         </View>)}
         <Text style={styles.label}>Delivery note (optional)</Text><TextInput style={styles.input} maxLength={200} value={receiptNote} onChangeText={setReceiptNote}/>
         {!!formError && <Text style={styles.error}>{formError}</Text>}
-        <Pressable style={styles.primary} disabled={saving} onPress={confirmReceive}>{saving ? <ActivityIndicator color="#fff"/> : <Text style={styles.primaryText}>Confirm stock receipt</Text>}</Pressable>
+        <Pressable style={styles.primary} disabled={saving} onPress={confirmReceive}><EmeraldGradient />{saving ? <ActivityIndicator color="#fff"/> : <Text style={styles.primaryText}>Confirm stock receipt</Text>}</Pressable>
         <Pressable style={styles.secondaryButton} disabled={saving} onPress={() => setReceiving(false)}><Text>Close</Text></Pressable>
       </ScrollView>
     </Modal>
@@ -253,19 +259,24 @@ const styles = StyleSheet.create({
   card:{ backgroundColor: '#FFFFFF', borderRadius: 18, padding: 17, marginBottom: 11, gap: 7, borderWidth: 1, borderColor: '#E6EBF1', shadowColor: '#12243A', shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
   between:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},
   title:{ fontSize: 15, fontWeight: '800', color: '#12243A' },
-  heading:{ fontSize: 24, fontWeight: '800', color: '#12243A', marginBottom: 8 },
+  heading:{ fontSize: 24, fontWeight: '900', color: '#FFFFFF', marginBottom: 6 },
+  receiptHeading: { fontSize: 23, fontWeight: '900', color: '#123247', marginTop: 45, marginBottom: 9 },
   secondary:{ color: '#64758B', fontSize: 13, lineHeight: 20 },
   small:{ color: '#8291A2', fontSize: 12 },
   status:{ color: '#047857', fontWeight: '800', textTransform: 'capitalize', fontSize: 11, backgroundColor: '#E3F7EF', overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 },
-  label:{ fontWeight: '700', fontSize: 13, color: '#18283C', marginTop: 12, marginBottom: 6 },
+  label:{ fontWeight: '800', fontSize: 12, color: '#244153', marginTop: 15, marginBottom: 8 },
   line:{ borderTopColor: '#E6EBF1', borderTopWidth: 1, paddingVertical: 13, gap: 5 },
-  input:{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#DFE6ED', padding: 14, borderRadius: 12, color: '#18283C' },
-  option:{ padding: 13, marginTop: 7, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E6EBF1' },
-  active:{ backgroundColor: '#E3F7EF', borderColor: '#059A75' },
-  primary:{ backgroundColor: '#059A75', padding: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+  input:{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D5E6E1', paddingHorizontal: 15, paddingVertical: 14, borderRadius: 13, color: '#193548', fontSize: 15, minHeight: 51 },
+  option:{ padding: 15, marginTop: 8, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#DBEAE4', elevation: 1 },
+  active:{ backgroundColor: '#E0F8ED', borderColor: '#0AA586', borderWidth: 1.5 },
+  primary:{ overflow: 'hidden', backgroundColor: '#0A9677', paddingVertical: 16, paddingHorizontal: 12, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 16, minHeight: 54, elevation: 2 },
   primaryText:{color:'#fff',fontWeight:'800'},
   danger:{backgroundColor:'#B91C1C',padding:15,borderRadius:10,alignItems:'center',marginTop:10},
-  secondaryButton:{ backgroundColor: '#E6EBF1', padding: 15, borderRadius: 12, alignItems: 'center', marginTop: 12 },
-  modal:{ padding: 22, paddingTop: 48, paddingBottom: 60, backgroundColor: '#F5F8FC' },
+  secondaryButton:{ backgroundColor: '#E3EFEC', padding: 15, borderRadius: 13, alignItems: 'center', marginTop: 12 },
+  modal:{ flexGrow: 1, paddingHorizontal: 18, paddingTop: 0, paddingBottom: 55, backgroundColor: '#F3F9F7' },
+  modalBanner: { backgroundColor: '#123247', marginHorizontal: -18, paddingHorizontal: 20, paddingTop: 45, paddingBottom: 25, marginBottom: 22 },
+  modalEyebrow: { color: '#83E6C6', fontSize: 10, fontWeight: '900', letterSpacing: 1.6, marginBottom: 9 },
+  modalBannerSubtitle: { color: '#CCE1DE', fontSize: 12, marginTop: 5, lineHeight: 18 },
+  sectionEyebrow: { color: '#0B8D71', fontSize: 10, fontWeight: '900', letterSpacing: 1.4, marginBottom: 4 },
   error:{color:'#B91C1C',marginVertical:10,fontWeight:'600'},
 });
