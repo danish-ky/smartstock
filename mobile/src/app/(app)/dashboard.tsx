@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
 import { LoadNotice, Page } from '../../components/MobileUI';
 import { useAuth } from '../../context/AuthContext';
 import { listItems } from '../../lib/api';
@@ -81,24 +82,33 @@ function SectionHeader({ eyebrow, title, subtitle }: { eyebrow: string; title: s
   );
 }
 
-function Metric({ label, value, mark, highlight = false }: {
+function Metric({ label, value, mark, selected, onPress }: {
   label: string;
   value: string | number;
   mark: string;
-  highlight?: boolean;
+  selected: boolean;
+  onPress: () => void;
 }) {
   return (
-    <View style={[styles.metric, highlight && styles.metricHighlight]}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+      accessibilityHint="Highlights this dashboard metric"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.metric, selected && styles.metricHighlight, pressed && styles.metricPressed]}
+    >
+      {selected && <View pointerEvents="none" style={styles.metricSelectionBar} />}
       <View style={styles.metricTop}>
-        <Text style={[styles.metricLabel, highlight && styles.lightLabel]}>{label}</Text>
-        <View style={[styles.metricMark, highlight && styles.metricMarkHighlight]}>
-          <Text style={[styles.metricMarkText, highlight && styles.lightValue]}>{mark}</Text>
+        <Text style={[styles.metricLabel, selected && styles.lightLabel]}>{label}</Text>
+        <View style={[styles.metricMark, selected && styles.metricMarkHighlight]}>
+          <Text style={[styles.metricMarkText, selected && styles.selectedMarkText]}>{mark}</Text>
         </View>
       </View>
-      <Text style={[styles.metricValue, highlight && styles.lightValue]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.68}>
+      <Text style={[styles.metricValue, selected && styles.lightValue]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.68}>
         {value}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -164,6 +174,8 @@ function OperatorDashboard() {
   const { data: forecast, busy: forecastBusy, error: forecastError, reload: reloadForecast } = useRemote<InventoryForecast>('/inventory/forecast/?limit=8');
   const displayName = user?.full_name || user?.name || user?.username || 'there';
   const refresh = () => { void reload(); void reloadForecast(); };
+  const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const metricSelect = (key: string) => setSelectedMetric(previous => previous === key ? null : key);
 
   return (
     <Page title="Overview" subtitle="Your operations dashboard" refreshing={busy || forecastBusy} onRefresh={refresh}>
@@ -172,12 +184,12 @@ function OperatorDashboard() {
       {data && !error && <>
         <SectionHeader eyebrow="BUSINESS SNAPSHOT" title="At a glance" subtitle="Current figures from your workspace" />
         <View style={styles.metricGrid}>
-          <Metric label="Products" value={data.total_products ?? '—'} mark="▦" highlight />
-          <Metric label="Stock units" value={data.stock_units ?? '—'} mark="◫" />
-          <Metric label="Orders" value={data.total_orders ?? '—'} mark="≡" />
-          <Metric label="Low stock" value={data.low_stock_count ?? '—'} mark="!" />
-          <Metric label="Customers" value={data.total_customers ?? '—'} mark="◉" />
-          <Metric label="Total sales" value={data.total_sales == null ? '—' : `₹${data.total_sales}`} mark="₹" />
+          <Metric label="Products" value={data.total_products ?? '—'} mark="▦" selected={selectedMetric === 'products'} onPress={() => metricSelect('products')} />
+          <Metric label="Stock units" value={data.stock_units ?? '—'} mark="◫" selected={selectedMetric === 'stock'} onPress={() => metricSelect('stock')} />
+          <Metric label="Orders" value={data.total_orders ?? '—'} mark="≡" selected={selectedMetric === 'orders'} onPress={() => metricSelect('orders')} />
+          <Metric label="Low stock" value={data.low_stock_count ?? '—'} mark="!" selected={selectedMetric === 'low'} onPress={() => metricSelect('low')} />
+          <Metric label="Customers" value={data.total_customers ?? '—'} mark="◉" selected={selectedMetric === 'customers'} onPress={() => metricSelect('customers')} />
+          <Metric label="Total sales" value={data.total_sales == null ? '—' : `₹${data.total_sales}`} mark="₹" selected={selectedMetric === 'sales'} onPress={() => metricSelect('sales')} />
         </View>
         <SectionHeader eyebrow="QUICK ACCESS" title="Go to" />
         <View style={styles.quickActions}>
@@ -212,6 +224,8 @@ function CustomerDashboard() {
   const { user } = useAuth();
   const { data, busy, error, reload } = useRemote<OrdersPayload>('/my/orders/');
   const orders = listItems(data);
+  const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const metricSelect = (key: string) => setSelectedMetric(previous => previous === key ? null : key);
   const displayName = user?.full_name || user?.name || user?.username || 'there';
   return (
     <Page title="My account" subtitle="Your Orevon customer portal" refreshing={busy} onRefresh={reload}>
@@ -220,8 +234,8 @@ function CustomerDashboard() {
       {data && !error && <>
         <SectionHeader eyebrow="YOUR ACTIVITY" title="My orders" />
         <View style={styles.metricGrid}>
-          <Metric label="All orders" value={orders.length} mark="≡" highlight />
-          <Metric label="Open orders" value={orders.filter(o => !['completed', 'cancelled', 'delivered'].includes(o.status || '')).length} mark="◉" />
+          <Metric label="All orders" value={orders.length} mark="≡" selected={selectedMetric === 'all'} onPress={() => metricSelect('all')} />
+          <Metric label="Open orders" value={orders.filter(o => !['completed', 'cancelled', 'delivered'].includes(o.status || '')).length} mark="◉" selected={selectedMetric === 'open'} onPress={() => metricSelect('open')} />
         </View>
         <SectionHeader eyebrow="QUICK ACCESS" title="Explore" />
         <Action title="My orders" hint="Track purchases" symbol="≡" onPress={() => router.push('/orders')} />
@@ -260,21 +274,24 @@ const styles = StyleSheet.create({
   eyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 1.3, color: '#078A71', marginBottom: 5 },
   sectionTitle: { fontSize: 19, fontWeight: '800', color: theme.text },
   sectionSubtitle: { color: theme.muted, fontSize: 12, marginTop: 5, lineHeight: 17 },
-  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 11 },
-  metric: { backgroundColor: theme.surface, borderRadius: 19, padding: 15, borderWidth: 1, borderColor: theme.border, flexBasis: '47%', flexGrow: 1, minHeight: 112, justifyContent: 'space-between' },
-  metricHighlight: { backgroundColor: theme.green, borderColor: theme.green },
+  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'stretch' },
+  metric: { overflow: 'hidden', backgroundColor: '#FFFFFF', borderRadius: 19, paddingHorizontal: 16, paddingVertical: 16, borderWidth: 1, borderColor: '#E2EEE9', flexBasis: '46%', flexGrow: 1, minWidth: 0, minHeight: 115, justifyContent: 'space-between', elevation: 2, shadowColor: '#153E38', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
+  metricHighlight: { backgroundColor: '#E5F9F0', borderColor: '#40C5A2', elevation: 4, shadowColor: '#0C9B78', shadowOpacity: 0.14 },
+  metricPressed: { opacity: 0.87, transform: [{ scale: 0.985 }] },
+  metricSelectionBar: { height: 3, backgroundColor: '#14B58F', position: 'absolute', top: 0, left: 14, right: 14, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 },
   metricTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 },
-  metricLabel: { color: theme.muted, fontSize: 12, fontWeight: '600' },
-  lightLabel: { color: '#E6FFF5' },
-  metricMark: { backgroundColor: '#F1F7F8', width: 26, height: 26, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
-  metricMarkHighlight: { backgroundColor: '#2EB491' },
-  metricMarkText: { color: theme.green, fontWeight: '800', fontSize: 15 },
-  metricValue: { fontSize: 23, fontWeight: '800', color: theme.text, marginTop: 14 },
-  lightValue: { color: '#FFFFFF' },
+  metricLabel: { color: '#64798A', fontSize: 12, fontWeight: '700' },
+  lightLabel: { color: '#0B7860' },
+  metricMark: { backgroundColor: '#ECF8F4', width: 30, height: 30, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  metricMarkHighlight: { backgroundColor: '#C6F0DF' },
+  metricMarkText: { color: '#0B9879', fontWeight: '800', fontSize: 15 },
+  selectedMarkText: { color: '#08745E' },
+  metricValue: { fontSize: 25, fontWeight: '900', color: theme.text, marginTop: 13 },
+  lightValue: { color: '#075B4C' },
   quickActions: { gap: 9 },
-  action: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: theme.border, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 2 },
+  action: { backgroundColor: '#FFFFFF', borderRadius: 17, borderWidth: 1, borderColor: '#DCEBE7', padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 3, elevation: 1 },
   pressed: { opacity: 0.75 },
-  actionIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: '#E6F7F1', alignItems: 'center', justifyContent: 'center' },
+  actionIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#DFF8EE', alignItems: 'center', justifyContent: 'center' },
   actionSymbol: { fontSize: 21, fontWeight: '800', color: theme.green },
   actionTextBlock: { flex: 1 },
   actionTitle: { fontSize: 14, fontWeight: '700', color: theme.text },

@@ -17,6 +17,7 @@ import { LoadNotice, Page, SectionTitle } from '../../components/MobileUI';
 import { ListFilters, ListMore, ListSearch, LoadedHint, StatusChip } from '../../components/OrevonListUI';
 import { useOrevonPages, type PagePayload } from '../../lib/useOrevonPages';
 import { OrevonScreenHero } from '../../components/OrevonScreenHero';
+import { EmeraldGradient } from '../../components/OrevonPolish';
 import { useAuth } from '../../context/AuthContext';
 import { useRemote } from '../../lib/useRemote';
 
@@ -228,6 +229,8 @@ function InventoryContent() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalBackdrop}>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalScroll}>
             <View style={styles.form}>
+          <View style={styles.formAccent} />
+          <Text style={styles.formEyebrow}>OREVON / INVENTORY</Text>
           <Text style={styles.formTitle}>
             {direction === 'in' ? 'Receive stock' : 'Remove stock'}
           </Text>
@@ -239,6 +242,7 @@ function InventoryContent() {
             value={quantityText}
             onChangeText={text => { setQuantityText(text); setSubmissionError(''); }}
             placeholder="Enter units"
+            placeholderTextColor="#8498A5"
             keyboardType="number-pad"
             style={styles.input}
             editable={!saving}
@@ -250,6 +254,7 @@ function InventoryContent() {
             value={note}
             onChangeText={setNote}
             placeholder="e.g. Supplier delivery or damaged items"
+            placeholderTextColor="#8498A5"
             multiline
             maxLength={240}
             style={[styles.input, styles.noteInput]}
@@ -266,6 +271,7 @@ function InventoryContent() {
               onPress={confirmAdjustment}
               style={[styles.formButton, styles.confirmButton, saving && styles.disabled]}
             >
+              <EmeraldGradient radius={13} />
               {saving ? <ActivityIndicator color="white" /> : <Text style={styles.confirmText}>Review change</Text>}
             </Pressable>
           </View>
@@ -397,18 +403,20 @@ const styles = StyleSheet.create({
   inText: { color: '#047857', fontWeight: '800' },
   outText: { color: '#334155', fontWeight: '800' },
   disabled: { opacity: 0.4 },
-  modalBackdrop: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(9,22,38,0.70)' },
-  modalScroll: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-  form: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 20, borderWidth: 1, borderColor: '#E6EBF1' },
-  formTitle: { fontSize: 21, fontWeight: '800', color: '#12243A' },
-  subtext: { fontSize: 13, color: '#64748B', marginTop: 7, marginBottom: 12 },
-  fieldLabel: { color: '#334155', fontWeight: '700', marginTop: 10, marginBottom: 7 },
-  input: { backgroundColor: '#F8FAFC', borderColor: '#DFE6ED', borderWidth: 1, borderRadius: 12, padding: 14, color: '#18283C' },
-  noteInput: { minHeight: 76, textAlignVertical: 'top' },
+  modalBackdrop: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(9,24,36,0.65)' },
+  modalScroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 28 },
+  form: { backgroundColor: '#FFFFFF', borderRadius: 26, padding: 22, borderWidth: 1, borderColor: '#D8ECE5', overflow: 'hidden', elevation: 14, shadowColor: '#041D21', shadowOpacity: 0.16, shadowRadius: 20 },
+  formAccent: { position: 'absolute', left: 0, right: 0, top: 0, height: 5, backgroundColor: '#0AB18D' },
+  formEyebrow: { fontSize: 10, letterSpacing: 1.4, fontWeight: '900', color: '#0C9072', marginTop: 7, marginBottom: 8 },
+  formTitle: { fontSize: 24, fontWeight: '900', color: '#143046' },
+  subtext: { fontSize: 13, color: '#657D8C', marginTop: 7, marginBottom: 15, lineHeight: 19 },
+  fieldLabel: { color: '#244253', fontSize: 12, fontWeight: '800', marginTop: 13, marginBottom: 9 },
+  input: { backgroundColor: '#F9FCFB', borderColor: '#D3E6E0', borderWidth: 1, borderRadius: 14, paddingHorizontal: 15, paddingVertical: 14, color: '#17384A', fontSize: 15, minHeight: 53 },
+  noteInput: { minHeight: 100, textAlignVertical: 'top' },
   error: { color: '#B91C1C', marginVertical: 12 },
-  formButton: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 11 },
-  cancelButton: { backgroundColor: '#E2E8F0' },
-  confirmButton: { backgroundColor: '#059A75' },
-  cancelText: { color: '#334155', fontWeight: '700' },
-  confirmText: { color: '#FFFFFF', fontWeight: '700' },
+  formButton: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 15, borderRadius: 13, minHeight: 52 },
+  cancelButton: { backgroundColor: '#E4EDF0' },
+  confirmButton: { overflow: 'hidden', backgroundColor: '#0A9778', elevation: 2 },
+  cancelText: { color: '#3C5365', fontWeight: '800', fontSize: 13 },
+  confirmText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
 });

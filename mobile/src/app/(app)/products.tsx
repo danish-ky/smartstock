@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LoadNotice, Page, SectionTitle } from '../../components/MobileUI';
 import { OrevonScreenHero } from '../../components/OrevonScreenHero';
+import { EmeraldGradient } from '../../components/OrevonPolish';
 import { ListFilters, ListMore, LoadedHint, StatusChip } from '../../components/OrevonListUI';
 import { useOrevonPages } from '../../lib/useOrevonPages';
 import { useAuth } from '../../context/AuthContext';
@@ -63,11 +64,15 @@ function FormField({ label, value, onChangeText, numeric = false, multiline = fa
   label: string; value: string; onChangeText: (value: string) => void;
   numeric?: boolean; multiline?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.fieldGroup}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
-        style={[styles.input, multiline && styles.multiline]}
+        style={[styles.input, multiline && styles.multiline, focused && styles.inputFocused]}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        selectionColor="#0AA586"
         value={value}
         onChangeText={onChangeText}
         placeholder={label}
@@ -497,13 +502,21 @@ export default function ProductsScreen() {
       <Modal visible={formOpen} animationType="slide" onRequestClose={() => { if (!formBusy) setFormOpen(false); }}>
         <SafeAreaView style={styles.formScreen}>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.formContent}>
-            <Text style={styles.formTitle}>{editing ? 'Edit product' : 'Add product'}</Text>
-            <Text style={styles.formHelp}>Only Admin and Manager can change catalog details. Stock is managed in Inventory.</Text>
+            <View style={styles.formBanner}>
+              <Text style={styles.formEyebrow}>OREVON / CATALOG</Text>
+              <Text style={styles.formTitle}>{editing ? 'Edit product' : 'Add product'}</Text>
+              <Text style={styles.formHelp}>Only Admin and Manager can change catalog details. Stock is managed in Inventory.</Text>
+            </View>
+            <Text style={styles.sectionEyebrow}>PRODUCT DETAILS</Text>
+            <View style={styles.formCard}>
             <FormField label="Name" value={form.name} onChangeText={v => changeForm('name', v)} />
             <FormField label="SKU" value={form.sku} onChangeText={v => changeForm('sku', v.toUpperCase())} />
             <FormField label="Selling price" value={form.price} onChangeText={v => changeForm('price', v)} numeric />
             <FormField label="Cost price" value={form.cost} onChangeText={v => changeForm('cost', v)} numeric />
             <FormField label="Low-stock threshold" value={form.low_stock_threshold} onChangeText={v => changeForm('low_stock_threshold', v)} numeric />
+            </View>
+            <Text style={styles.sectionEyebrow}>ORGANIZATION</Text>
+            <View style={styles.formCard}>
             <Text style={styles.fieldLabel}>Category (required)</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.choiceList}>
               {categories.map(category => (
@@ -527,6 +540,9 @@ export default function ProductsScreen() {
                 </Pressable>
               ))}
             </ScrollView>
+            </View>
+            <Text style={styles.sectionEyebrow}>DETAILS & MEDIA</Text>
+            <View style={styles.formCard}>
             <FormField label="Description" value={form.description} onChangeText={v => changeForm('description', v)} multiline />
             <Text style={styles.fieldLabel}>Product image (JPG, PNG or WebP; max 3 MB)</Text>
             {(pickedImage?.uri || editing?.image_url) && (
@@ -542,8 +558,10 @@ export default function ProductsScreen() {
                 </Pressable>
               )}
             </View>
+            </View>
             {!!formError && <Text accessibilityRole="alert" style={styles.formError}>{formError}</Text>}
             <Pressable disabled={formBusy} style={[styles.createButton, formBusy && styles.disabled]} onPress={() => { void saveProduct(); }}>
+              <EmeraldGradient />
               {formBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.actionText}>{editing ? 'Save product' : 'Create product'}</Text>}
             </Pressable>
             <Pressable disabled={formBusy} style={styles.closeFormButton} onPress={() => setFormOpen(false)}>
@@ -591,7 +609,8 @@ const styles = StyleSheet.create({
   lookupCard: { backgroundColor: '#FFFFFF', padding: 19, borderRadius: 19, borderWidth: 1, borderColor: '#E6EBF1', shadowColor: '#12243A', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2, marginBottom: 7 },
   lookupTitle: { color: '#12243A', fontSize: 18, fontWeight: '800', marginBottom: 7 },
   helper: { color: '#64748B', fontSize: 12, lineHeight: 19, marginBottom: 14 },
-  input: { color: '#18283C', borderWidth: 1, borderColor: '#DFE6ED', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, fontSize: 15 },
+  input: { color: '#183246', borderWidth: 1, borderColor: '#D5E5E2', backgroundColor: '#FAFDFC', borderRadius: 14, paddingHorizontal: 15, paddingVertical: 14, fontSize: 15, minHeight: 52 },
+  inputFocused: { borderColor: '#0AA586', borderWidth: 1.5, backgroundColor: '#FFFFFF' },
   actions: { flexDirection: 'row', gap: 9, marginTop: 12 },
   action: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, paddingHorizontal: 7, borderRadius: 10 },
   searchAction: { backgroundColor: '#12243A' },
@@ -608,13 +627,12 @@ const styles = StyleSheet.create({
   resultHint: { color: '#64748B', fontSize: 11, marginTop: 10, lineHeight: 16 },
   searched: { color: '#64748B', fontSize: 11, marginTop: 12 },
   cameraScreen: { flex: 1, backgroundColor: '#071B17', padding: 18 },
-  formTitle: { color: '#12243A', fontSize: 22, fontWeight: '800', marginTop: 10 },
   cameraTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', marginTop: 10 },
   cameraHelp: { color: '#D1FAE5', fontSize: 13, marginTop: 10, marginBottom: 18 },
   camera: { flex: 1, minHeight: 260, borderRadius: 16, overflow: 'hidden' },
   cameraHint: { color: '#D1FAE5', textAlign: 'center', fontSize: 12, marginVertical: 15 },
   closeButton: { backgroundColor: '#334155', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginBottom: 4 },
-  createButton: { backgroundColor: '#059A75', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 12, borderRadius: 13, marginBottom: 11 },
+  createButton: { overflow: 'hidden', backgroundColor: '#098D73', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, paddingHorizontal: 12, borderRadius: 15, marginBottom: 11, minHeight: 54, elevation: 3 },
   catalogSearch: { marginBottom: 13 },
   productStockLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7, marginTop: 6 },
   emptyStock: { color: '#B42336' },
@@ -629,19 +647,24 @@ const styles = StyleSheet.create({
   productActions: { flexDirection: 'row', gap: 9, marginTop: 12 },
   editButton: { flex: 1, backgroundColor: '#12243A', borderRadius: 11, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
   archiveButton: { flex: 1, backgroundColor: '#B74B52', borderRadius: 11, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
-  formScreen: { flex: 1, backgroundColor: '#F5F8FC' },
-  formContent: { padding: 20, paddingBottom: 40 },
-  formHelp: { color: '#64748B', fontSize: 12, marginTop: 7, marginBottom: 22, lineHeight: 18 },
-  fieldGroup: { marginBottom: 14 },
-  fieldLabel: { color: '#18283C', fontWeight: '700', fontSize: 13, marginBottom: 7 },
-  multiline: { minHeight: 90, textAlignVertical: 'top' },
+  formScreen: { flex: 1, backgroundColor: '#F3F9F7' },
+  formContent: { paddingHorizontal: 18, paddingTop: 0, paddingBottom: 54 },
+  formBanner: { backgroundColor: '#123247', paddingTop: 25, paddingBottom: 22, paddingHorizontal: 20, marginHorizontal: -18, marginBottom: 20 },
+  formEyebrow: { color: '#8AE8C9', fontSize: 10, fontWeight: '900', letterSpacing: 1.7, marginBottom: 9 },
+  formTitle: { color: '#FFFFFF', fontSize: 25, fontWeight: '900', letterSpacing: -0.3 },
+  formHelp: { color: '#C9E0DF', fontSize: 12, marginTop: 8, lineHeight: 19 },
+  sectionEyebrow: { color: '#0B886F', fontSize: 10, fontWeight: '900', letterSpacing: 1.5, marginBottom: 10, marginLeft: 4 },
+  formCard: { backgroundColor: '#FFFFFF', borderRadius: 20, paddingHorizontal: 17, paddingTop: 18, paddingBottom: 4, marginBottom: 18, borderWidth: 1, borderColor: '#DEECE7', elevation: 2, shadowColor: '#154039', shadowOpacity: 0.04, shadowRadius: 10 },
+  fieldGroup: { marginBottom: 17 },
+  fieldLabel: { color: '#244153', fontWeight: '800', fontSize: 12, marginBottom: 8 },
+  multiline: { minHeight: 105, textAlignVertical: 'top' },
   choiceList: { flexGrow: 0, marginBottom: 18 },
-  choiceChip: { backgroundColor: '#FFFFFF', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 19, marginRight: 8, borderWidth: 1, borderColor: '#DFE6ED' },
-  chosenChip: { backgroundColor: '#E3F7EF', borderColor: '#059A75' },
-  choiceText: { color: '#334155', fontWeight: '600', fontSize: 12 },
-  chosenText: { color: '#047857' },
+  choiceChip: { backgroundColor: '#FFFFFF', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#D5E8E1' },
+  chosenChip: { backgroundColor: '#DDF8EC', borderColor: '#0AA586' },
+  choiceText: { color: '#3A5361', fontWeight: '700', fontSize: 12 },
+  chosenText: { color: '#08745E' },
   previewImage: { width: 160, height: 140, borderRadius: 12, backgroundColor: '#FFFFFF', marginBottom: 10 },
   formError: { color: '#B91C1C', marginVertical: 14, fontSize: 13 },
-  closeFormButton: { paddingVertical: 14, alignItems: 'center' },
+  closeFormButton: { paddingVertical: 14, alignItems: 'center', backgroundColor: '#E8F1F0', borderRadius: 13, marginBottom: 12 },
   closeFormText: { color: '#334155', fontWeight: '700' },
 });

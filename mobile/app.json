@@ -35,7 +35,8 @@
         }
       ],
       "expo-secure-store",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -51,6 +52,13 @@
         "projectId": "d97d23dd-127b-4f0a-af3c-102d5bb9d0df"
       }
     },
-    "owner": "danishky"
+    "owner": "danishky",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d97d23dd-127b-4f0a-af3c-102d5bb9d0df",
+      "checkAutomatically": "ON_ERROR_RECOVERY"
+    }
   }
 }
